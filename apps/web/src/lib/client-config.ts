@@ -2,6 +2,8 @@ import { api } from './api';
 
 /** Public feature switches from `GET /api/config`. */
 export interface ClientConfig {
+  /** False when the API could not be reached at all (e.g. a web-only deploy). */
+  reachable: boolean;
   googleSignIn: boolean;
   videoSearch: boolean;
   streamRelay: boolean;
@@ -9,6 +11,7 @@ export interface ClientConfig {
 }
 
 const FALLBACK: ClientConfig = {
+  reachable: false,
   googleSignIn: false,
   videoSearch: false,
   streamRelay: false,
@@ -23,7 +26,7 @@ let pending: Promise<ClientConfig> | null = null;
  */
 export function getClientConfig(): Promise<ClientConfig> {
   pending ??= api<Partial<ClientConfig>>('/api/config')
-    .then((config) => ({ ...FALLBACK, ...config }))
+    .then((config) => ({ ...FALLBACK, ...config, reachable: true }))
     .catch(() => {
       pending = null; // allow a retry on the next call
       return FALLBACK;

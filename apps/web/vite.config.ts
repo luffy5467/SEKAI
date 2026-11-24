@@ -2,6 +2,7 @@ import { fileURLToPath } from 'node:url';
 import tailwindcss from '@tailwindcss/vite';
 import { tanstackStart } from '@tanstack/react-start/plugin/vite';
 import viteReact from '@vitejs/plugin-react';
+import { nitro } from 'nitro/vite';
 import { defineConfig } from 'vite';
 
 // Prerendering is what used to make the Docker build take five minutes: the
@@ -10,6 +11,11 @@ import { defineConfig } from 'vite';
 // to server-render, so it is only worth paying that cost when a build
 // explicitly asks for it.
 const prerender = process.env.PRERENDER === '1';
+
+// Vercel builds go through Nitro, which emits the platform's output format.
+// Every other build (Docker, `node server.js`) keeps the plain Start output,
+// so Nitro is only added when a target platform is named.
+const nitroTarget = Boolean(process.env.VERCEL || process.env.NITRO_PRESET);
 
 export default defineConfig({
   plugins: [
@@ -21,6 +27,7 @@ export default defineConfig({
       },
       pages: prerender ? [{ path: '/' }] : [],
     }),
+    ...(nitroTarget ? [nitro()] : []),
     viteReact(),
   ],
 

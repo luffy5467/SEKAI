@@ -1,6 +1,7 @@
 import { createRootRoute, HeadContent, Outlet, Scripts } from '@tanstack/react-router';
 import { NotFound } from '~/components/not-found';
 import { Providers } from '~/components/providers';
+import { ServiceNotice } from '~/components/service-notice';
 import { themeBootstrapScript } from '~/components/theme-provider';
 import appCss from '~/styles/app.css?url';
 
@@ -60,6 +61,7 @@ function RootLayout() {
       </head>
       <body className="min-h-dvh font-sans antialiased">
         <Providers>
+          <ServiceNotice />
           <Outlet />
         </Providers>
         <Scripts />

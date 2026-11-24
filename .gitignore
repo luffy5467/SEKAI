@@ -30,3 +30,7 @@ next-env.d.ts
 e2e/fixtures/*.webm
 e2e/test-results/
 e2e/playwright-report/
+
+# Deployment build output
+apps/web/.vercel/
+apps/web/.output/
