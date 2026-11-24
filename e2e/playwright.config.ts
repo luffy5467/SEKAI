@@ -33,7 +33,8 @@ export default defineConfig({
       // Each run registers fresh accounts and guests; the production defaults
       // (10 and 20 per hour per IP) would throttle the suite after a few runs.
       command:
-        "bash -c 'E2E_DB=\"${DATABASE_URL:-}\"; set -a; . ./.env; set +a; if [ -n \"$E2E_DB\" ]; then export DATABASE_URL=\"$E2E_DB\"; fi; RL_REGISTER_PER_HOUR=1000 RL_GUEST_PER_HOUR=1000 cargo run --manifest-path apps/server/Cargo.toml'",
+        // biome-ignore lint/suspicious/noTemplateCurlyInString: `${DATABASE_URL:-}` is Bash parameter expansion run by `bash -c`, not a JS template; a template literal would break it
+        'bash -c \'E2E_DB="${DATABASE_URL:-}"; set -a; . ./.env; set +a; if [ -n "$E2E_DB" ]; then export DATABASE_URL="$E2E_DB"; fi; RL_REGISTER_PER_HOUR=1000 RL_GUEST_PER_HOUR=1000 cargo run --manifest-path apps/server/Cargo.toml\'',
       cwd: '..',
       url: 'http://localhost:8080/health/ready',
       reuseExistingServer: true,
