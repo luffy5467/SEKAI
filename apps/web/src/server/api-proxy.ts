@@ -24,7 +24,8 @@
  *
  * The secret proves "came through this proxy". It is not user authentication
  * or CSRF protection — those stay bearer tokens, the SameSite refresh cookie,
- * and the API's CORS allow-list (the browser's `Origin` is forwarded as-is).
+ * the API's Origin check on the cookie endpoints (refresh, logout) and its
+ * CORS allow-list. The browser's `Origin` is forwarded as-is for those checks.
  */
 
 export const PROXY_AUTH_HEADER = 'x-sekai-proxy-auth';

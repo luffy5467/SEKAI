@@ -179,6 +179,29 @@ fn decoy_hash() -> &'static str {
     })
 }
 
+/// CSRF defence for the two endpoints that act on the refresh cookie, in
+/// addition to `SameSite=Lax`: a browser request whose `Origin` is not one of
+/// our web origins is refused before any cookie is read or written. Requests
+/// without `Origin` (non-browser clients) are allowed — they cannot carry a
+/// victim's cookies. `Origin: null` (sandboxed or opaque contexts) is refused.
+fn reject_cross_site(state: &AppState, headers: &HeaderMap) -> Result<(), AppError> {
+    match headers.get(axum::http::header::ORIGIN) {
+        None => Ok(()),
+        Some(origin) => {
+            let allowed = state.config.allowed_origins();
+            if origin_allowed(origin.to_str().ok(), &allowed) {
+                Ok(())
+            } else {
+                Err(AppError::Forbidden("Cross-site request refused."))
+            }
+        }
+    }
+}
+
+fn origin_allowed(origin: Option<&str>, allowed: &[String]) -> bool {
+    origin.is_some_and(|value| allowed.iter().any(|candidate| candidate == value))
+}
+
 /// The rate-limit subject for an unauthenticated request: the same resolver
 /// as the general throttle (`client_ip::resolve`), never the raw TCP peer or
 /// a forwarded header on its own.
@@ -326,7 +349,12 @@ async fn update_profile(
 /// or a stolen cookie, and we cannot tell which — so the entire token family is
 /// revoked and the user re-authenticates. This is the standard OAuth 2.1
 /// recommendation for public clients.
-async fn refresh(State(state): State<AppState>, jar: CookieJar) -> AppResult<Response> {
+async fn refresh(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    jar: CookieJar,
+) -> AppResult<Response> {
+    reject_cross_site(&state, &headers)?;
     let presented = jar
         .get(REFRESH_COOKIE)
         .map(|cookie| cookie.value().to_owned())
@@ -371,7 +399,15 @@ async fn refresh(State(state): State<AppState>, jar: CookieJar) -> AppResult<Res
     issue_session_in_family(&state, jar, &user, record.family_id).await
 }
 
-async fn logout(State(state): State<AppState>, jar: CookieJar) -> AppResult<Response> {
+async fn logout(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    jar: CookieJar,
+) -> AppResult<Response> {
+    // Without this, any site could submit a form here: the browser withholds
+    // the SameSite=Lax cookie (so nothing is revoked) but still applies the
+    // clearing Set-Cookie below, signing the visitor out.
+    reject_cross_site(&state, &headers)?;
     if let Some(cookie) = jar.get(REFRESH_COOKIE) {
         let hash = util::sha256_hex(cookie.value());
         if let Some(record) = db::users::find_refresh_token(&state.db, &hash).await? {
@@ -641,6 +677,28 @@ mod tests {
         assert!(validate_display_name("日本語名").is_ok());
         assert!(validate_display_name("日本").is_ok());
         assert!(validate_display_name(&"あ".repeat(33)).is_err());
+    }
+}
+
+#[cfg(test)]
+mod origin_tests {
+    use super::origin_allowed;
+
+    #[test]
+    fn only_exact_configured_origins_are_allowed() {
+        let allowed = vec!["https://sekai.example".to_owned()];
+        assert!(origin_allowed(Some("https://sekai.example"), &allowed));
+        for bad in [
+            "https://attacker.example",
+            "https://sekai.example.attacker.example",
+            "http://sekai.example",
+            "https://sekai.example:444",
+            "null",
+            "",
+        ] {
+            assert!(!origin_allowed(Some(bad), &allowed), "{bad}");
+        }
+        assert!(!origin_allowed(None, &allowed), "a non-UTF-8 Origin is refused");
     }
 }
 

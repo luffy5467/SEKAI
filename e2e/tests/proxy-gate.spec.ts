@@ -217,7 +217,70 @@ test.describe('WebSocket tickets', () => {
 
 // --- browser-origin / CSRF, separately from CORS ---------------------------------------
 
-test.describe('cross-origin reads', () => {
+test.describe('cross-site requests in a real browser', () => {
+  test('a cross-site page cannot spend or revoke the victim’s refresh session', async ({
+    browser,
+  }) => {
+    const context = await browser.newContext();
+    const victim = await context.newPage();
+    const ip = randomIp('203.0');
+    const email = uniqueEmail('victim');
+
+    // Victim signs in on the real site (same-origin, through the proxy).
+    await victim.goto(`${WEB}/`);
+    const login = await victim.evaluate(
+      async ([email, ip]) => {
+        const register = await fetch('/api/auth/register', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'content-type': 'application/json', 'x-real-ip': ip },
+          body: JSON.stringify({ email, password: 'correct-horse-battery', displayName: 'Victim' }),
+        });
+        return register.status;
+      },
+      [email, ip],
+    );
+    expect(login).toBe(200);
+    const refreshCookie = (await context.cookies()).find((c) => c.name === 'yr_refresh');
+    expect(refreshCookie?.sameSite).toBe('Lax');
+    const before = refreshCookie?.value;
+
+    // An attacker page on another site fires state-changing requests at the
+    // victim's origin: a credentialed fetch and a top-level form POST.
+    await context.route('http://attacker.test/**', (route) =>
+      route.fulfill({
+        contentType: 'text/html',
+        body: `<form id="f" method="POST" action="${WEB}/api/auth/logout"></form>`,
+      }),
+    );
+    const attacker = await context.newPage();
+    await attacker.goto('http://attacker.test/');
+    await attacker.evaluate(async (web) => {
+      try {
+        await fetch(`${web}/api/auth/refresh`, { method: 'POST', credentials: 'include' });
+      } catch {
+        /* unreadable by CORS — irrelevant to what this test checks */
+      }
+    }, WEB);
+    await Promise.all([
+      attacker.waitForURL(`${WEB}/api/auth/logout`).catch(() => undefined),
+      attacker.evaluate(() => (document.getElementById('f') as HTMLFormElement).submit()),
+    ]);
+
+    // Evidence from the SERVER's state, not from CORS: had either request
+    // carried the cookie, `refresh` would have rotated it (making the old one
+    // a reused token that revokes the family) and `logout` would have revoked
+    // it. The victim's original cookie is unchanged and still refreshes.
+    const after = (await context.cookies()).find((c) => c.name === 'yr_refresh')?.value;
+    expect(after, 'the cross-site logout must not clear the cookie').toBe(before);
+    const status = await victim.evaluate(async () => {
+      const res = await fetch('/api/auth/refresh', { method: 'POST', credentials: 'include' });
+      return res.status;
+    });
+    expect(status).toBe(200);
+    await context.close();
+  });
+
   test('CORS: only the configured web origin may read API responses', async () => {
     const foreign = await api.get(viaProxy('/api/config'), {
       headers: { origin: 'http://attacker.test' },
@@ -225,6 +288,63 @@ test.describe('cross-origin reads', () => {
     expect(foreign.headers()['access-control-allow-origin']).toBeUndefined();
     const own = await api.get(viaProxy('/api/config'), { headers: { origin: WEB } });
     expect(own.headers()['access-control-allow-origin']).toBe(WEB);
+  });
+});
+
+// --- Origin rules on the cookie endpoints (refresh, logout) ------------------------------
+
+test.describe('refresh and logout Origin rules', () => {
+  /** A cookie-keeping client signed in through the proxy. */
+  async function signedIn(): Promise<APIRequestContext> {
+    const client = await playwrightRequest.newContext();
+    const res = await client.post(viaProxy('/api/auth/register'), {
+      headers: { 'x-real-ip': randomIp('203.0'), origin: WEB },
+      data: {
+        email: uniqueEmail('origin'),
+        password: 'correct-horse-battery',
+        displayName: 'Origin Check',
+      },
+    });
+    expect(res.status()).toBe(200);
+    return client;
+  }
+  const refresh = (client: APIRequestContext, origin?: string) =>
+    client.post(viaProxy('/api/auth/refresh'), { headers: origin ? { origin } : {} });
+  const logout = (client: APIRequestContext, origin?: string) =>
+    client.post(viaProxy('/api/auth/logout'), { headers: origin ? { origin } : {} });
+
+  test('same-origin refresh and logout work through the proxy', async () => {
+    const client = await signedIn();
+    expect((await refresh(client, WEB)).status()).toBe(200);
+
+    const out = await logout(client, WEB);
+    expect(out.status()).toBe(200);
+    expect(out.headers()['set-cookie']).toContain('yr_refresh=');
+    // Logged out for real: the session no longer refreshes.
+    expect((await refresh(client, WEB)).status()).toBe(401);
+    await client.dispose();
+  });
+
+  test('a missing Origin is allowed (non-browser clients cannot carry a victim’s cookie)', async () => {
+    const client = await signedIn();
+    expect((await refresh(client)).status()).toBe(200);
+    expect((await logout(client)).status()).toBe(200);
+    await client.dispose();
+  });
+
+  test('Origin: null and foreign origins are refused without touching the session', async () => {
+    const client = await signedIn();
+    for (const origin of ['null', 'http://attacker.test', `${WEB}.attacker.test`]) {
+      const r = await refresh(client, origin);
+      expect(r.status(), `refresh ${origin}`).toBe(403);
+      expect(r.headers()['set-cookie'], `refresh ${origin}`).toBeUndefined();
+      const l = await logout(client, origin);
+      expect(l.status(), `logout ${origin}`).toBe(403);
+      expect(l.headers()['set-cookie'], `logout ${origin}`).toBeUndefined();
+    }
+    // Nothing was rotated, revoked or cleared: the original session still refreshes.
+    expect((await refresh(client, WEB)).status()).toBe(200);
+    await client.dispose();
   });
 });
 
