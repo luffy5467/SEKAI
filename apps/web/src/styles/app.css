@@ -242,6 +242,7 @@
   .theme-transition *,
   .theme-transition *::before,
   .theme-transition *::after {
+    /* biome-ignore lint/complexity/noImportantStyles: must beat every component transition for one frame during a theme swap */
     transition: none !important;
   }
 }
@@ -277,9 +278,11 @@
   *,
   *::before,
   *::after {
+    /* biome-ignore-start lint/complexity/noImportantStyles: reduced-motion reset must win over every component style */
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
+    /* biome-ignore-end lint/complexity/noImportantStyles: end of reduced-motion reset */
   }
 }

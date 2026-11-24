@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url';
 import tailwindcss from '@tailwindcss/vite';
 import { tanstackStart } from '@tanstack/react-start/plugin/vite';
 import viteReact from '@vitejs/plugin-react';
@@ -30,6 +31,13 @@ export default defineConfig({
   // deployed client sends its API and WebSocket traffic to the web host instead
   // of the API host.
   envPrefix: ['VITE_', 'PUBLIC_'],
+
+  // `~/…` imports are declared in tsconfig `paths`. The production build
+  // happened to resolve them, but the dev SSR runner does not read tsconfig,
+  // so every server-rendered page failed with "Cannot find module '~/…'".
+  resolve: {
+    alias: { '~': fileURLToPath(new URL('./src', import.meta.url)) },
+  },
 
   // Prerendering boots a preview server on an ephemeral port and fetches the
   // pages over the loopback interface. Left to default, Vite binds the literal

@@ -55,10 +55,7 @@ function RootLayout() {
         <HeadContent />
         {/* Applies the stored theme before first paint. Without it every page
             load flashes the default palette before settling. */}
-        <script
-          // biome-ignore lint/security/noDangerouslySetInnerHtml: the theme bootstrap must run before paint
-          dangerouslySetInnerHTML={{ __html: themeBootstrapScript }}
-        />
+        <script dangerouslySetInnerHTML={{ __html: themeBootstrapScript }} />
       </head>
       <body className="min-h-dvh font-sans antialiased">
         <Providers>

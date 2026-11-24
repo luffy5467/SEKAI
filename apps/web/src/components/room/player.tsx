@@ -1,5 +1,5 @@
-import { Slider as SliderPrimitive } from "@base-ui/react/slider";
-import { type MediaSource, mayBeLive, positionAt } from "@playercn/protocol";
+import { Slider as SliderPrimitive } from '@base-ui/react/slider';
+import { type MediaSource, mayBeLive, positionAt } from '@playercn/protocol';
 import {
   Check,
   Copy,
@@ -22,10 +22,10 @@ import {
   Volume1,
   Volume2,
   VolumeX,
-} from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
-import { toast } from "sonner";
-import { Button } from "~/components/ui/button";
+} from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { toast } from 'sonner';
+import { Button } from '~/components/ui/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -37,21 +37,17 @@ import {
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
-} from "~/components/ui/dropdown-menu";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "~/components/ui/tooltip";
-import { cn, formatDuration } from "~/lib/utils";
-import type { PlayerEngine } from "~/realtime/player/engine";
-import { KickEngine } from "~/realtime/player/kick-engine";
-import { MediaEngine } from "~/realtime/player/media-engine";
-import { TwitchEngine } from "~/realtime/player/twitch-engine";
-import { YouTubeEngine } from "~/realtime/player/youtube-engine";
-import type { RoomSocket } from "~/realtime/socket";
-import { usePlayerSync } from "~/realtime/use-player-sync";
-import { usePermissions, useQueue, useTimeline } from "~/stores/room-store";
+} from '~/components/ui/dropdown-menu';
+import { Tooltip, TooltipContent, TooltipTrigger } from '~/components/ui/tooltip';
+import { cn, formatDuration } from '~/lib/utils';
+import type { PlayerEngine } from '~/realtime/player/engine';
+import { KickEngine } from '~/realtime/player/kick-engine';
+import { MediaEngine } from '~/realtime/player/media-engine';
+import { TwitchEngine } from '~/realtime/player/twitch-engine';
+import { YouTubeEngine } from '~/realtime/player/youtube-engine';
+import type { RoomSocket } from '~/realtime/socket';
+import { usePlayerSync } from '~/realtime/use-player-sync';
+import { usePermissions, useQueue, useTimeline } from '~/stores/room-store';
 
 const RATES = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2] as const;
 
@@ -59,11 +55,7 @@ const RATES = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2] as const;
 const SKIP = 10;
 
 /** Source kinds that draw into a third-party iframe rather than a `<video>`. */
-const EMBEDDED_KINDS = new Set<MediaSource["kind"]>([
-  "youtube",
-  "twitch",
-  "kick",
-]);
+const EMBEDDED_KINDS = new Set<MediaSource['kind']>(['youtube', 'twitch', 'kick']);
 
 /** How long the chrome stays up after the pointer stops moving (desktop). */
 const IDLE_MS = 2600;
@@ -98,7 +90,7 @@ export function Player({
   onEngine?: (engine: PlayerEngine | null) => void;
   /** Owned by the room, because it is the room's layout that changes. */
   theatre?: boolean;
-  onTheatre?: () => void;
+  onTheatre?: (() => void) | undefined;
 }) {
   const timeline = useTimeline();
   const permissions = usePermissions();
@@ -138,7 +130,7 @@ export function Player({
   const embedded = source ? EMBEDDED_KINDS.has(source.kind) : false;
   // Kick's embed takes no volume parameter and no volume call, so it gets a
   // mute toggle instead of a slider rather than a slider that does nothing.
-  const hasVolume = source?.kind !== "kick";
+  const hasVolume = source?.kind !== 'kick';
   const awaiting = timeline?.awaitingStart ?? false;
   const paused = timeline?.paused ?? true;
   const duration = timeline?.duration ?? null;
@@ -179,7 +171,7 @@ export function Player({
       },
       onReady: () => {
         setBuffering(false);
-        socket?.send({ t: "playback_ready", version: versionRef.current });
+        socket?.send({ t: 'playback_ready', version: versionRef.current });
       },
       onLive: () => setEngineLive(true),
       onAudioBlocked: () => {
@@ -191,24 +183,19 @@ export function Player({
         setQuality(engineRef.current?.quality?.() ?? null);
       },
       onDurationChange: (seconds: number) => {
-        if (canControlRef.current)
-          socket?.send({ t: "report_duration", seconds });
+        if (canControlRef.current) socket?.send({ t: 'report_duration', seconds });
       },
     };
 
     const mount = mountRef.current as HTMLElement;
     const next: PlayerEngine =
-      source.kind === "youtube"
+      source.kind === 'youtube'
         ? new YouTubeEngine(mount, source, events)
-        : source.kind === "twitch"
+        : source.kind === 'twitch'
           ? new TwitchEngine(mount, source, events)
-          : source.kind === "kick"
+          : source.kind === 'kick'
             ? new KickEngine(mount, source, events)
-            : new MediaEngine(
-                videoRef.current as HTMLVideoElement,
-                source,
-                events,
-              );
+            : new MediaEngine(videoRef.current as HTMLVideoElement, source, events);
 
     engineRef.current = next;
     setEngine(next);
@@ -228,8 +215,7 @@ export function Player({
 
   useEffect(() => {
     if (!timeline || !socket) return;
-    const update = () =>
-      setPosition(positionAt(timeline, socket.clock.serverNow()));
+    const update = () => setPosition(positionAt(timeline, socket.clock.serverNow()));
     update();
     const id = setInterval(update, 250);
     return () => clearInterval(id);
@@ -237,25 +223,23 @@ export function Player({
 
   useEffect(() => {
     const onChange = () => setFullscreen(Boolean(document.fullscreenElement));
-    document.addEventListener("fullscreenchange", onChange);
-    return () => document.removeEventListener("fullscreenchange", onChange);
+    document.addEventListener('fullscreenchange', onChange);
+    return () => document.removeEventListener('fullscreenchange', onChange);
   }, []);
 
   const send = useCallback(
     (action: SyncAction) => {
       if (!socket || !timeline) return;
-      socket.send({ t: "sync_intent", action, version: timeline.version });
+      socket.send({ t: 'sync_intent', action, version: timeline.version });
     },
     [socket, timeline],
   );
 
-  const { visible, wake, tap } = useChrome(
-    paused || awaiting || Boolean(error),
-  );
+  const { visible, wake, tap } = useChrome(paused || awaiting || Boolean(error));
 
   const toggle = useCallback(() => {
     if (!canControl) return;
-    send({ kind: paused ? "play" : "pause" });
+    send({ kind: paused ? 'play' : 'pause' });
   }, [canControl, paused, send]);
 
   const seekBy = useCallback(
@@ -263,7 +247,7 @@ export function Player({
       if (!canControl) return;
       const ceiling = duration ?? position + Math.abs(delta);
       send({
-        kind: "seek",
+        kind: 'seek',
         position: Math.max(0, Math.min(position + delta, ceiling)),
       });
     },
@@ -313,17 +297,17 @@ export function Player({
   );
 
   const copyLink = useCallback(() => {
-    void navigator.clipboard.writeText(source?.url ?? "");
-    toast.success("Source URL copied");
+    void navigator.clipboard.writeText(source?.url ?? '');
+    toast.success('Source URL copied');
   }, [source]);
 
   const toggleLoop = useCallback(
     (next: boolean) => {
-      send({ kind: "set_loop", loop: next });
+      send({ kind: 'set_loop', loop: next });
       toast.success(
         next
-          ? "Repeating this video — it will replay when it ends."
-          : "Repeat off — the room moves on to the next item.",
+          ? 'Repeating this video — it will replay when it ends.'
+          : 'Repeat off — the room moves on to the next item.',
       );
     },
     [send],
@@ -333,40 +317,37 @@ export function Player({
 
   const shown = scrub ?? position;
   const progress = duration && duration > 0 ? Math.min(1, shown / duration) : 0;
-  const canPip =
-    !embedded &&
-    typeof document !== "undefined" &&
-    document.pictureInPictureEnabled;
+  const canPip = !embedded && typeof document !== 'undefined' && document.pictureInPictureEnabled;
 
   const player = (
     <div
       ref={containerRef}
       onPointerMove={(event) => {
-        if (event.pointerType !== "touch") wake();
+        if (event.pointerType !== 'touch') wake();
       }}
       onPointerLeave={(event) => {
-        if (event.pointerType !== "touch") wake(false);
+        if (event.pointerType !== 'touch') wake(false);
       }}
       className={cn(
-        "group/player relative isolate aspect-video w-full overflow-hidden bg-black select-none",
+        'group/player relative isolate aspect-video w-full overflow-hidden bg-black select-none',
         // In theatre mode the sizing is owned by the centring wrapper below,
         // so the box itself only needs to stay a 16:9 rectangle that never
         // exceeds it. Outside theatre it is a rounded card in a column.
-        theatre ? "max-h-full max-w-full" : "rounded-xl",
-        !visible && "cursor-none",
+        theatre ? 'max-h-full max-w-full' : 'rounded-xl',
+        !visible && 'cursor-none',
       )}
     >
       {/* Both mounts always exist so switching source kinds does not depend on
           a ref that has not been attached yet on the render the engine builds. */}
       <div
         ref={mountRef}
-        className={cn("size-full", !embedded && "hidden")}
+        className={cn('size-full', !embedded && 'hidden')}
         aria-hidden={!embedded}
       />
       {/* biome-ignore lint/a11y/useMediaCaption: captions ship inside the source */}
       <video
         ref={videoRef}
-        className={cn("size-full bg-black", embedded && "hidden")}
+        className={cn('size-full bg-black', embedded && 'hidden')}
         playsInline
         aria-hidden={embedded}
       />
@@ -382,7 +363,7 @@ export function Player({
           toggle();
         }}
         onPointerUp={(event) => {
-          if (event.pointerType !== "touch") return;
+          if (event.pointerType !== 'touch') return;
           if (!visible) {
             tap();
             return;
@@ -391,7 +372,7 @@ export function Player({
         }}
         onDoubleClick={() => toggleFullscreen(containerRef.current)}
         disabled={!canControl}
-        aria-label={paused ? "Play" : "Pause"}
+        aria-label={paused ? 'Play' : 'Pause'}
         className="absolute inset-0 z-10 cursor-default disabled:cursor-default"
       />
 
@@ -402,19 +383,17 @@ export function Player({
         paused={paused}
         canControl={canControl}
         poster={posterFor(source, nowPlaying?.thumbnailUrl)}
-        onSkip={() => send({ kind: "next" })}
+        onSkip={() => send({ kind: 'next' })}
       />
 
-      {audioBlocked && !paused ? (
-        <UnmuteOverlay onUnmute={restoreAudio} />
-      ) : null}
+      {audioBlocked && !paused ? <UnmuteOverlay onUnmute={restoreAudio} /> : null}
 
       <div
         className={cn(
-          "absolute inset-x-0 bottom-0 z-20 flex flex-col gap-2 px-3 pt-14 pb-2.5 sm:gap-3 sm:px-6 sm:pt-16 sm:pb-4",
-          "bg-gradient-to-t from-black/90 via-black/50 to-transparent",
-          "transition-opacity duration-200",
-          visible ? "opacity-100" : "pointer-events-none opacity-0",
+          'absolute inset-x-0 bottom-0 z-20 flex flex-col gap-2 px-3 pt-14 pb-2.5 sm:gap-3 sm:px-6 sm:pt-16 sm:pb-4',
+          'bg-gradient-to-t from-black/90 via-black/50 to-transparent',
+          'transition-opacity duration-200',
+          visible ? 'opacity-100' : 'pointer-events-none opacity-0',
         )}
       >
         <div className="flex items-end justify-between gap-3">
@@ -435,10 +414,7 @@ export function Player({
               </span>
             </span>
           ) : (
-            <span
-              className="shrink-0 text-[11px] text-white/90 sm:text-xs"
-              data-numeric
-            >
+            <span className="shrink-0 text-[11px] text-white/90 sm:text-xs" data-numeric>
               {formatDuration(shown)} / {formatDuration(duration)}
             </span>
           )}
@@ -455,7 +431,7 @@ export function Player({
             onScrub={setScrub}
             onCommit={(next) => {
               setScrub(null);
-              send({ kind: "seek", position: next });
+              send({ kind: 'seek', position: next });
             }}
           />
         )}
@@ -464,7 +440,7 @@ export function Player({
         <div className="hidden items-center justify-between gap-2 sm:flex">
           <div className="flex items-center gap-0.5">
             <ControlButton
-              label={paused ? "Play" : "Pause"}
+              label={paused ? 'Play' : 'Pause'}
               disabled={!canControl}
               onClick={toggle}
             >
@@ -491,14 +467,14 @@ export function Player({
             <ControlButton
               label="Previous"
               disabled={!canControl}
-              onClick={() => send({ kind: "previous" })}
+              onClick={() => send({ kind: 'previous' })}
             >
               <SkipBack className="size-5" />
             </ControlButton>
             <ControlButton
               label="Next"
               disabled={!canControl}
-              onClick={() => send({ kind: "next" })}
+              onClick={() => send({ kind: 'next' })}
             >
               <SkipForward className="size-5" />
             </ControlButton>
@@ -522,26 +498,22 @@ export function Player({
             />
 
             {qualities.length > 1 ? (
-              <QualityMenu
-                qualities={qualities}
-                quality={quality}
-                onSelect={applyQuality}
-              />
+              <QualityMenu qualities={qualities} quality={quality} onSelect={applyQuality} />
             ) : null}
 
             {live ? null : (
               <RateMenu
                 rate={timeline?.rate ?? 1}
-                onSelect={(rate) => send({ kind: "set_rate", rate })}
+                onSelect={(rate) => send({ kind: 'set_rate', rate })}
               />
             )}
 
             {onTheatre ? (
               <ControlButton
-                label={theatre ? "Exit theatre mode" : "Theatre mode"}
+                label={theatre ? 'Exit theatre mode' : 'Theatre mode'}
                 aria-pressed={theatre}
                 onClick={onTheatre}
-                className={cn(theatre && "bg-white/20 hover:bg-white/25")}
+                className={cn(theatre && 'bg-white/20 hover:bg-white/25')}
               >
                 {theatre ? (
                   <RectangleHorizontal className="size-5" />
@@ -557,10 +529,8 @@ export function Player({
                 onClick={() => {
                   const video = videoRef.current;
                   if (!video) return;
-                  if (document.pictureInPictureElement)
-                    void document.exitPictureInPicture();
-                  else
-                    void video.requestPictureInPicture().catch(() => undefined);
+                  if (document.pictureInPictureElement) void document.exitPictureInPicture();
+                  else void video.requestPictureInPicture().catch(() => undefined);
                 }}
               >
                 <PictureInPicture2 className="size-5" />
@@ -568,20 +538,16 @@ export function Player({
             ) : null}
 
             <ControlButton
-              label={fullscreen ? "Exit fullscreen" : "Fullscreen"}
+              label={fullscreen ? 'Exit fullscreen' : 'Fullscreen'}
               onClick={() => toggleFullscreen(containerRef.current)}
             >
-              {fullscreen ? (
-                <Minimize className="size-5" />
-              ) : (
-                <Maximize className="size-5" />
-              )}
+              {fullscreen ? <Minimize className="size-5" /> : <Maximize className="size-5" />}
             </ControlButton>
 
             <MoreMenu
               canControl={canControl}
               onCopyLink={copyLink}
-              onRestart={() => send({ kind: "restart" })}
+              onRestart={() => send({ kind: 'restart' })}
             />
           </div>
         </div>
@@ -591,7 +557,7 @@ export function Player({
         <div className="flex items-center justify-between gap-1 sm:hidden">
           <div className="flex items-center gap-0.5">
             <ControlButton
-              label={paused ? "Play" : "Pause"}
+              label={paused ? 'Play' : 'Pause'}
               disabled={!canControl}
               onClick={toggle}
               className="size-11"
@@ -632,15 +598,11 @@ export function Player({
               compact
             />
             <ControlButton
-              label={fullscreen ? "Exit fullscreen" : "Fullscreen"}
+              label={fullscreen ? 'Exit fullscreen' : 'Fullscreen'}
               onClick={() => toggleFullscreen(containerRef.current)}
               className="size-10"
             >
-              {fullscreen ? (
-                <Minimize className="size-5" />
-              ) : (
-                <Maximize className="size-5" />
-              )}
+              {fullscreen ? <Minimize className="size-5" /> : <Maximize className="size-5" />}
             </ControlButton>
             <MobileMoreSheet
               canControl={canControl}
@@ -648,7 +610,7 @@ export function Player({
               looping={timeline?.loop ?? false}
               onToggleLoop={toggleLoop}
               rate={timeline?.rate ?? 1}
-              onRate={(rate) => send({ kind: "set_rate", rate })}
+              onRate={(rate) => send({ kind: 'set_rate', rate })}
               qualities={qualities}
               quality={quality}
               onQuality={applyQuality}
@@ -658,14 +620,12 @@ export function Player({
               onPip={() => {
                 const video = videoRef.current;
                 if (!video) return;
-                if (document.pictureInPictureElement)
-                  void document.exitPictureInPicture();
-                else
-                  void video.requestPictureInPicture().catch(() => undefined);
+                if (document.pictureInPictureElement) void document.exitPictureInPicture();
+                else void video.requestPictureInPicture().catch(() => undefined);
               }}
-              onPrevious={() => send({ kind: "previous" })}
-              onNext={() => send({ kind: "next" })}
-              onRestart={() => send({ kind: "restart" })}
+              onPrevious={() => send({ kind: 'previous' })}
+              onNext={() => send({ kind: 'next' })}
+              onRestart={() => send({ kind: 'restart' })}
               onCopyLink={copyLink}
             />
           </div>
@@ -681,23 +641,19 @@ export function Player({
   // leave a sliver of dead space at the bottom, and the flex centring means
   // the 16:9 box is never pinned to a corner with leftover black margin — it
   // sits in the middle of whatever room the viewport actually has.
-  return (
-    <div className="flex h-dvh w-full items-center justify-center bg-black">
-      {player}
-    </div>
-  );
+  return <div className="flex h-dvh w-full items-center justify-center bg-black">{player}</div>;
 }
 
 type SyncAction =
-  | { kind: "play" }
-  | { kind: "pause" }
-  | { kind: "seek"; position: number }
-  | { kind: "set_rate"; rate: number }
-  | { kind: "set_loop"; loop: boolean }
-  | { kind: "play_now"; queueItemId: string }
-  | { kind: "next" }
-  | { kind: "previous" }
-  | { kind: "restart" };
+  | { kind: 'play' }
+  | { kind: 'pause' }
+  | { kind: 'seek'; position: number }
+  | { kind: 'set_rate'; rate: number }
+  | { kind: 'set_loop'; loop: boolean }
+  | { kind: 'play_now'; queueItemId: string }
+  | { kind: 'next' }
+  | { kind: 'previous' }
+  | { kind: 'restart' };
 
 /**
  * The auto-hiding chrome.
@@ -803,25 +759,19 @@ function LoopButton({
             size="icon-sm"
             disabled={disabled}
             aria-pressed={looping}
-            aria-label={
-              looping ? "Stop repeating this video" : "Repeat this video"
-            }
+            aria-label={looping ? 'Stop repeating this video' : 'Repeat this video'}
             onClick={() => onToggle(!looping)}
             className={cn(
-              "size-9 text-white hover:bg-white/15 hover:text-white",
-              looping && "bg-white/20 text-white hover:bg-white/25",
+              'size-9 text-white hover:bg-white/15 hover:text-white',
+              looping && 'bg-white/20 text-white hover:bg-white/25',
             )}
           >
-            {looping ? (
-              <Repeat1 className="size-5" />
-            ) : (
-              <Repeat className="size-5" />
-            )}
+            {looping ? <Repeat1 className="size-5" /> : <Repeat className="size-5" />}
           </Button>
         }
       />
       <TooltipContent>
-        {looping ? "Repeating this video" : "Repeat this video when it ends"}
+        {looping ? 'Repeating this video' : 'Repeat this video when it ends'}
       </TooltipContent>
     </Tooltip>
   );
@@ -856,17 +806,16 @@ function VolumeControl({
   /** Mobile: the button opens a small floating popover instead of expanding inline. */
   compact?: boolean;
 }) {
-  const Icon =
-    muted || volume === 0 ? VolumeX : volume < 0.5 ? Volume1 : Volume2;
+  const Icon = muted || volume === 0 ? VolumeX : volume < 0.5 ? Volume1 : Volume2;
 
   if (!slider) {
     return (
       <ControlButton
-        label={muted ? "Unmute" : "Mute"}
+        label={muted ? 'Unmute' : 'Mute'}
         onClick={onMute}
-        className={compact ? "size-10" : undefined}
+        className={compact ? 'size-10' : undefined}
       >
-        <Icon className={compact ? "size-5" : "size-5"} />
+        <Icon className={compact ? 'size-5' : 'size-5'} />
       </ControlButton>
     );
   }
@@ -875,7 +824,7 @@ function VolumeControl({
     return (
       <div className="relative">
         <ControlButton
-          label={muted ? "Unmute" : "Mute"}
+          label={muted ? 'Unmute' : 'Mute'}
           onClick={() => onOpenChange(!open)}
           className="size-10"
         >
@@ -911,17 +860,16 @@ function VolumeControl({
   }
 
   return (
-    <div
-      className="group/volume flex items-center"
+    <fieldset
+      aria-label="Volume"
+      className="group/volume m-0 flex min-w-0 items-center border-0 p-0"
       onMouseEnter={() => onOpenChange(true)}
       onMouseLeave={() => onOpenChange(false)}
     >
-      <ControlButton label={muted ? "Unmute" : "Mute"} onClick={onMute}>
+      <ControlButton label={muted ? 'Unmute' : 'Mute'} onClick={onMute}>
         <Icon className="size-5" />
       </ControlButton>
-      <div
-        className={cn("w-0 overflow-hidden transition-[width]", open && "w-20")}
-      >
+      <div className={cn('w-0 overflow-hidden transition-[width]', open && 'w-20')}>
         <SliderPrimitive.Root
           value={[muted ? 0 : volume]}
           min={0}
@@ -943,7 +891,7 @@ function VolumeControl({
           </SliderPrimitive.Control>
         </SliderPrimitive.Root>
       </div>
-    </div>
+    </fieldset>
   );
 }
 
@@ -976,12 +924,12 @@ function QualityMenu({
           <DropdownMenuLabel>Quality</DropdownMenuLabel>
           <DropdownMenuSeparator />
           <DropdownMenuItem onClick={() => onSelect(null)}>
-            Auto{quality === null ? " ·" : ""}
+            Auto{quality === null ? ' ·' : ''}
           </DropdownMenuItem>
           {qualities.map((option) => (
             <DropdownMenuItem key={option} onClick={() => onSelect(option)}>
               {option}
-              {option === quality ? " ·" : ""}
+              {option === quality ? ' ·' : ''}
             </DropdownMenuItem>
           ))}
         </DropdownMenuGroup>
@@ -990,13 +938,7 @@ function QualityMenu({
   );
 }
 
-function RateMenu({
-  rate,
-  onSelect,
-}: {
-  rate: number;
-  onSelect: (rate: number) => void;
-}) {
+function RateMenu({ rate, onSelect }: { rate: number; onSelect: (rate: number) => void }) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -1017,7 +959,7 @@ function RateMenu({
           <DropdownMenuSeparator />
           {RATES.map((option) => (
             <DropdownMenuItem key={option} onClick={() => onSelect(option)}>
-              {option}×{option === rate ? " ·" : ""}
+              {option}×{option === rate ? ' ·' : ''}
             </DropdownMenuItem>
           ))}
         </DropdownMenuGroup>
@@ -1098,7 +1040,7 @@ function MobileMoreSheet({
   quality: string | null;
   onQuality: (next: string | null) => void;
   theatre: boolean;
-  onTheatre?: () => void;
+  onTheatre?: (() => void) | undefined;
   canPip: boolean;
   onPip: () => void;
   onPrevious: () => void;
@@ -1133,16 +1075,9 @@ function MobileMoreSheet({
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
         <DropdownMenuGroup>
-          <DropdownMenuItem
-            disabled={!canControl}
-            onClick={() => onToggleLoop(!looping)}
-          >
-            {looping ? (
-              <Repeat1 className="size-4" />
-            ) : (
-              <Repeat className="size-4" />
-            )}
-            {looping ? "Repeating — tap to stop" : "Repeat this video"}
+          <DropdownMenuItem disabled={!canControl} onClick={() => onToggleLoop(!looping)}>
+            {looping ? <Repeat1 className="size-4" /> : <Repeat className="size-4" />}
+            {looping ? 'Repeating — tap to stop' : 'Repeat this video'}
           </DropdownMenuItem>
           {!live ? (
             <DropdownMenuSub>
@@ -1153,11 +1088,7 @@ function MobileMoreSheet({
               <DropdownMenuSubContent>
                 {RATES.map((option) => (
                   <DropdownMenuItem key={option} onClick={() => onRate(option)}>
-                    {option === rate ? (
-                      <Check className="size-4" />
-                    ) : (
-                      <span className="size-4" />
-                    )}
+                    {option === rate ? <Check className="size-4" /> : <span className="size-4" />}
                     {option}×
                   </DropdownMenuItem>
                 ))}
@@ -1168,22 +1099,15 @@ function MobileMoreSheet({
             <DropdownMenuSub>
               <DropdownMenuSubTrigger>
                 <Settings2 className="size-4" />
-                Quality · {quality ?? "Auto"}
+                Quality · {quality ?? 'Auto'}
               </DropdownMenuSubTrigger>
               <DropdownMenuSubContent>
                 <DropdownMenuItem onClick={() => onQuality(null)}>
-                  {quality === null ? (
-                    <Check className="size-4" />
-                  ) : (
-                    <span className="size-4" />
-                  )}
+                  {quality === null ? <Check className="size-4" /> : <span className="size-4" />}
                   Auto
                 </DropdownMenuItem>
                 {qualities.map((option) => (
-                  <DropdownMenuItem
-                    key={option}
-                    onClick={() => onQuality(option)}
-                  >
+                  <DropdownMenuItem key={option} onClick={() => onQuality(option)}>
                     {option === quality ? (
                       <Check className="size-4" />
                     ) : (
@@ -1200,12 +1124,8 @@ function MobileMoreSheet({
         <DropdownMenuGroup>
           {onTheatre ? (
             <DropdownMenuItem onClick={onTheatre}>
-              {theatre ? (
-                <RectangleHorizontal className="size-4" />
-              ) : (
-                <Frame className="size-4" />
-              )}
-              {theatre ? "Exit theatre mode" : "Theatre mode"}
+              {theatre ? <RectangleHorizontal className="size-4" /> : <Frame className="size-4" />}
+              {theatre ? 'Exit theatre mode' : 'Theatre mode'}
             </DropdownMenuItem>
           ) : null}
           {canPip ? (
@@ -1250,17 +1170,10 @@ function StatusOverlay({
       <div className="absolute inset-0 z-30 grid place-items-center p-6 text-center">
         <Artwork poster={poster} dim="bg-black/85" />
         <div className="relative max-w-sm space-y-2">
-          <p className="text-sm font-medium text-white">
-            Can't play this source
-          </p>
+          <p className="text-sm font-medium text-white">Can't play this source</p>
           <p className="text-xs text-white/70">{error}</p>
           {canControl ? (
-            <Button
-              size="sm"
-              variant="secondary"
-              onClick={onSkip}
-              className="mt-2"
-            >
+            <Button size="sm" variant="secondary" onClick={onSkip} className="mt-2">
               Skip to next
             </Button>
           ) : null}
@@ -1313,7 +1226,7 @@ function UnmuteOverlay({ onUnmute }: { onUnmute: () => void }) {
 }
 
 function Artwork({ poster, dim }: { poster: string | null; dim: string }) {
-  if (!poster) return <span className={cn("absolute inset-0", dim)} />;
+  if (!poster) return <span className={cn('absolute inset-0', dim)} />;
 
   return (
     <>
@@ -1325,17 +1238,14 @@ function Artwork({ poster, dim }: { poster: string | null; dim: string }) {
         className="absolute inset-0 bg-contain bg-center bg-no-repeat"
         style={{ backgroundImage: `url(${poster})` }}
       />
-      <span className={cn("absolute inset-0", dim)} />
+      <span className={cn('absolute inset-0', dim)} />
     </>
   );
 }
 
-function posterFor(
-  source: MediaSource,
-  queueThumbnail: string | undefined,
-): string | null {
+function posterFor(source: MediaSource, queueThumbnail: string | undefined): string | null {
   if (queueThumbnail) return queueThumbnail;
-  if (source.kind === "youtube" && source.videoId) {
+  if (source.kind === 'youtube' && source.videoId) {
     return `https://i.ytimg.com/vi/${source.videoId}/hqdefault.jpg`;
   }
   return null;
@@ -1356,7 +1266,7 @@ function ControlButton({
             size="icon-sm"
             aria-label={label}
             className={cn(
-              "size-9 text-white hover:bg-white/15 hover:text-white disabled:opacity-40",
+              'size-9 text-white hover:bg-white/15 hover:text-white disabled:opacity-40',
               className,
             )}
             {...props}
@@ -1390,21 +1300,21 @@ function toggleFullscreen(node: HTMLElement | null): void {
 }
 
 function firstThumb(value: number | readonly number[]): number | undefined {
-  return typeof value === "number" ? value : value[0];
+  return typeof value === 'number' ? value : value[0];
 }
 
 function titleFromSource(source: MediaSource): string {
-  if (source.kind === "youtube") return "YouTube video";
-  if (source.kind === "twitch" || source.kind === "kick") {
-    const name = source.url.split("/").filter(Boolean).pop();
-    return name ?? (source.kind === "twitch" ? "Twitch" : "Kick");
+  if (source.kind === 'youtube') return 'YouTube video';
+  if (source.kind === 'twitch' || source.kind === 'kick') {
+    const name = source.url.split('/').filter(Boolean).pop();
+    return name ?? (source.kind === 'twitch' ? 'Twitch' : 'Kick');
   }
   try {
     const { pathname, hostname } = new URL(source.url);
-    const file = pathname.split("/").filter(Boolean).pop();
+    const file = pathname.split('/').filter(Boolean).pop();
     return file ? decodeURIComponent(file) : hostname;
   } catch {
-    return "Now playing";
+    return 'Now playing';
   }
 }
 
@@ -1421,12 +1331,12 @@ function describeState({
   source: MediaSource;
   nowPlaying: { channelTitle: string } | null;
 }): string {
-  if (awaiting) return "Waiting for everyone to load…";
-  if (buffering) return "Buffering…";
+  if (awaiting) return 'Waiting for everyone to load…';
+  if (buffering) return 'Buffering…';
   if (nowPlaying?.channelTitle) return nowPlaying.channelTitle;
-  if (source.kind === "kick") return "Kick";
-  if (source.kind === "twitch") return "Twitch";
-  if (live) return "Live stream";
+  if (source.kind === 'kick') return 'Kick';
+  if (source.kind === 'twitch') return 'Twitch';
+  if (live) return 'Live stream';
   try {
     return new URL(source.url).hostname;
   } catch {
