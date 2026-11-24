@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
+import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 /**
@@ -10,6 +11,8 @@ import { fileURLToPath } from 'node:url';
 export default function globalSetup() {
   const out = fileURLToPath(new URL('./fixtures/sync-test.webm', import.meta.url));
   if (existsSync(out)) return;
+  // Git does not track empty directories, so a fresh checkout has no fixtures/.
+  mkdirSync(dirname(out), { recursive: true });
   execFileSync(
     'ffmpeg',
     [

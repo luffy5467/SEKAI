@@ -15,7 +15,10 @@ for (const [name, viewport] of Object.entries(sizes)) {
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(400);
     const slug = path === '/' ? 'home' : path.replace(/[^a-z]+/g, '-').replace(/^-|-$/g, '');
-    await page.screenshot({ path: `${out}/${label}-${name}-${slug}.png`, fullPage: name === 'desktop' && path === '/' });
+    await page.screenshot({
+      path: `${out}/${label}-${name}-${slug}.png`,
+      fullPage: name === 'desktop' && path === '/',
+    });
   }
   await page.close();
 }
