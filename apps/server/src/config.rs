@@ -172,6 +172,8 @@ pub struct LimitsConfig {
     pub sync_intents_per_minute: u32,
     pub reactions_per_minute: u32,
     pub rooms_per_hour: u32,
+    /// Email-account registrations per IP per hour.
+    pub registrations_per_hour: u32,
     pub http_per_minute: u32,
     /// Playlist imports are metered separately and far more tightly: one
     /// request makes the server fetch a third-party URL and can append
@@ -288,6 +290,7 @@ impl Config {
                 sync_intents_per_minute: parse_opt("RL_SYNC_PER_MIN")?.unwrap_or(60),
                 reactions_per_minute: parse_opt("RL_REACTION_PER_MIN")?.unwrap_or(40),
                 rooms_per_hour: parse_opt("RL_ROOMS_PER_HOUR")?.unwrap_or(10),
+                registrations_per_hour: parse_opt("RL_REGISTER_PER_HOUR")?.unwrap_or(10),
                 http_per_minute: parse_opt("RL_HTTP_PER_MIN")?.unwrap_or(300),
                 imports_per_minute: parse_opt("RL_IMPORTS_PER_MIN")?.unwrap_or(3),
                 playlist_max_bytes: parse_opt("PLAYLIST_MAX_BYTES")?.unwrap_or(4 * 1024 * 1024),
@@ -559,6 +562,7 @@ mod tests {
                 sync_intents_per_minute: 60,
                 reactions_per_minute: 40,
                 rooms_per_hour: 10,
+                registrations_per_hour: 10,
                 http_per_minute: 300,
                 imports_per_minute: 3,
                 playlist_max_bytes: 4 * 1024 * 1024,

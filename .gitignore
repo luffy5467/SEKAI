@@ -25,3 +25,8 @@ test-results/
 # Next.js
 .next/
 next-env.d.ts
+
+# e2e
+e2e/fixtures/*.webm
+e2e/test-results/
+e2e/playwright-report/

@@ -63,7 +63,12 @@ export function AccountForm({
       else await signInWithPassword(email, password);
       onDone?.();
     } catch (cause) {
-      if (cause instanceof ApiError) {
+      if (cause instanceof ApiError && cause.status === 429) {
+        const minutes = Math.max(1, Math.ceil((cause.retryAfterMs ?? 60_000) / 60_000));
+        setErrors({
+          form: `Too many attempts. Please try again in ${minutes} minute${minutes === 1 ? '' : 's'}.`,
+        });
+      } else if (cause instanceof ApiError) {
         setErrors(cause.fields ?? { form: cause.message });
       } else {
         setErrors({ form: 'Something went wrong. Please try again.' });

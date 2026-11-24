@@ -202,7 +202,8 @@ async fn register(
     jar: CookieJar,
     Json(body): Json<RegisterRequest>,
 ) -> AppResult<Response> {
-    limit(&state, "register", &peer.ip().to_string(), 10, 3600).await?;
+    let per_hour = state.config.limits.registrations_per_hour;
+    limit(&state, "register", &peer.ip().to_string(), per_hour, 3600).await?;
 
     let email = normalize_email(&body.email)?;
     validate_password(&body.password)?;

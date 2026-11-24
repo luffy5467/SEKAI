@@ -1,6 +1,7 @@
 packages:
   - "apps/*"
   - "packages/*"
+  - "e2e"
 
 # Native postinstall scripts we explicitly trust. Everything else stays blocked,
 # which is the whole point of the allowlist.
