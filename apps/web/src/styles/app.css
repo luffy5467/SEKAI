@@ -277,6 +277,48 @@
   }
 }
 
+/* SEKAI motion — CSS only, so the server-rendered page animates before JS. */
+@keyframes sekai-rise {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes sekai-progress {
+  from {
+    width: 34%;
+  }
+  to {
+    width: 62%;
+  }
+}
+@keyframes sekai-chat {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.sekai-rise {
+  animation: sekai-rise 0.9s var(--ease-cinema) both;
+}
+.sekai-delay-2 {
+  animation-delay: 0.25s;
+}
+.sekai-progress {
+  animation: sekai-progress 14s linear infinite;
+}
+.sekai-chat {
+  animation: sekai-chat 0.4s var(--ease-cinema) both;
+}
+
 /*
  * Respect the operating-system preference over everything above. This has to
  * come last and win outright: a decorative animation that survives here is one
