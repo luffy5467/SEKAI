@@ -1,6 +1,7 @@
 import { createRootRoute, HeadContent, Outlet, Scripts } from '@tanstack/react-router';
 import { NotFound } from '~/components/not-found';
 import { Providers } from '~/components/providers';
+import { ServiceNotice } from '~/components/service-notice';
 import { themeBootstrapScript } from '~/components/theme-provider';
 import appCss from '~/styles/app.css?url';
 
@@ -20,15 +21,16 @@ export const Route = createRootRoute({
         name: 'viewport',
         content: 'width=device-width, initial-scale=1, viewport-fit=cover',
       },
-      { title: 'playercn — watch anything together, perfectly in sync' },
+      { name: 'theme-color', content: '#08090d' },
+      { title: 'SEKAI · 世界 — One world. One screen. Together.' },
       {
         name: 'description',
         content:
-          'Create a room, share one link, and watch together in perfect sync — YouTube, direct video files, HLS and DASH streams, and whole playlists.',
+          'SEKAI is a private watch-party platform: create a room, invite friends with one link, and watch media you are allowed to share in perfect sync — with chat built in.',
       },
-      { name: 'application-name', content: 'playercn' },
-      { property: 'og:title', content: 'playercn' },
-      { property: 'og:description', content: 'Watch anything together, perfectly in sync.' },
+      { name: 'application-name', content: 'SEKAI' },
+      { property: 'og:title', content: 'SEKAI · 世界' },
+      { property: 'og:description', content: 'One world. One screen. Together.' },
       { property: 'og:type', content: 'website' },
       { name: 'twitter:card', content: 'summary_large_image' },
     ],
@@ -55,13 +57,11 @@ function RootLayout() {
         <HeadContent />
         {/* Applies the stored theme before first paint. Without it every page
             load flashes the default palette before settling. */}
-        <script
-          // biome-ignore lint/security/noDangerouslySetInnerHtml: the theme bootstrap must run before paint
-          dangerouslySetInnerHTML={{ __html: themeBootstrapScript }}
-        />
+        <script dangerouslySetInnerHTML={{ __html: themeBootstrapScript }} />
       </head>
       <body className="min-h-dvh font-sans antialiased">
         <Providers>
+          <ServiceNotice />
           <Outlet />
         </Providers>
         <Scripts />

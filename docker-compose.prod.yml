@@ -87,7 +87,14 @@ services:
       # Traefik (and Cloudflare in front of it) is the only way in, so the
       # forwarded headers can be believed. Without this every user shares one
       # rate-limit bucket, because the TCP peer is always the proxy.
-      TRUST_PROXY_HEADERS: 'true'
+      # Browsers reach /api only through the web container's proxy, which
+      # attaches this secret; direct /api calls to API_DOMAIN get 403. Same
+      # value on both services; generate with `openssl rand -hex 32`.
+      SEKAI_PROXY_SECRET: ${SEKAI_PROXY_SECRET:?SEKAI_PROXY_SECRET is required}
+      # Off unless your edge proxy is verified to overwrite this header on
+      # every request (see docs/deployment.md). Used for WebSocket upgrades,
+      # which connect to API_DOMAIN directly.
+      EDGE_CLIENT_IP_HEADER: ${EDGE_CLIENT_IP_HEADER:-}
       DATABASE_URL: postgres://${POSTGRES_USER:-ytroom}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-ytroom}
       REDIS_URL: redis://redis:6379
       PUBLIC_URL: https://${API_DOMAIN:?API_DOMAIN is required}
@@ -150,10 +157,19 @@ services:
       context: .
       dockerfile: apps/web/Dockerfile
       args:
-        PUBLIC_API_URL: https://${API_DOMAIN}
+        # Empty: the browser calls /api on DOMAIN, and the web container
+        # proxies it to the API with the proxy secret (apps/web/src/server).
+        PUBLIC_API_URL: ''
         PUBLIC_WS_URL: wss://${API_DOMAIN}
     restart: always
     logging: *logging
+    environment:
+      SEKAI_API_ORIGIN: http://server:8080
+      SEKAI_PROXY_SECRET: ${SEKAI_PROXY_SECRET:?SEKAI_PROXY_SECRET is required}
+      # The header your edge proxy sets to the visitor's IP, once verified to
+      # be overwritten on every request (Caddy: x-real-ip, see
+      # docs/deployment.md). Unset: all visitors share one login/sign-up bucket.
+      SEKAI_PROXY_CLIENT_IP_HEADER: ${SEKAI_PROXY_CLIENT_IP_HEADER:-}
     depends_on:
       - server
     deploy:

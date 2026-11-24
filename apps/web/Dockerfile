@@ -72,7 +72,7 @@ ENV NODE_ENV=production \
 COPY --from=runtime-deps --chown=node:node /runtime/package.json ./package.json
 COPY --from=runtime-deps --chown=node:node /runtime/node_modules ./node_modules
 COPY --from=builder --chown=node:node /repo/apps/web/dist ./dist
-COPY --from=builder --chown=node:node /repo/apps/web/server.js ./server.js
+COPY --from=builder --chown=node:node /repo/apps/web/node-server.mjs ./node-server.mjs
 
 USER node
 EXPOSE 3000
@@ -85,4 +85,4 @@ LABEL org.opencontainers.image.title="playercn-web" \
       org.opencontainers.image.licenses="MIT"
 
 ENTRYPOINT ["/sbin/tini", "--"]
-CMD ["node", "server.js"]
+CMD ["node", "node-server.mjs"]

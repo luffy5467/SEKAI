@@ -42,10 +42,10 @@ export interface ThemeMeta {
 export const THEMES: ThemeMeta[] = [
   {
     key: 'default',
-    label: 'Default',
-    description: 'High-contrast neutral',
-    light: ['oklch(0.99 0 0)', 'oklch(1 0 0)', 'oklch(0 0 0)'],
-    dark: ['oklch(0 0 0)', 'oklch(0.14 0 0)', 'oklch(1 0 0)'],
+    label: 'SEKAI',
+    description: 'Tokyo midnight',
+    light: ['#f7f6f3', '#ffffff', '#c92a37'],
+    dark: ['#08090d', '#101116', '#e63946'],
   },
   {
     key: 'amethyst',

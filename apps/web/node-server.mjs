@@ -1,6 +1,10 @@
-// Production entry point.
+// Production entry point for Docker / plain Node.
 //
-// Run with: node server.js   (from the directory containing dist/)
+// Deliberately not named server.js: Nitro (used for Vercel builds) treats a
+// server.js next to the app as its own server entry and would bundle this
+// file — starting a listener inside the serverless function, which hangs it.
+//
+// Run with: node node-server.mjs   (from the directory containing dist/)
 import { serve } from 'srvx';
 import { serveStatic } from 'srvx/static';
 

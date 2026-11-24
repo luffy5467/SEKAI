@@ -75,6 +75,11 @@ pub struct MediaSource {
     pub url: String,
     /// Set for, and only for, `SourceKind::Youtube`.
     pub video_id: Option<String>,
+    /// End-to-end encrypted rooms: the real source (kind, URL, title) sealed
+    /// with the room key. `url` is then `crate::e2ee::SEALED_SOURCE_URL` and
+    /// `kind` is `File`; only members' browsers can open the real one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sealed: Option<String>,
 }
 
 impl MediaSource {
@@ -83,6 +88,7 @@ impl MediaSource {
             kind: SourceKind::Youtube,
             url: format!("https://www.youtube.com/watch?v={video_id}"),
             video_id: Some(video_id),
+            sealed: None,
         }
     }
 }
@@ -138,6 +144,7 @@ pub fn classify(input: &str) -> Option<Classified> {
             kind: SourceKind::Hls,
             url,
             video_id: None,
+            sealed: None,
         }));
     }
 
@@ -152,6 +159,7 @@ pub fn classify(input: &str) -> Option<Classified> {
             kind: SourceKind::Dash,
             url,
             video_id: None,
+            sealed: None,
         }));
     }
 
@@ -162,6 +170,7 @@ pub fn classify(input: &str) -> Option<Classified> {
         kind: SourceKind::File,
         url,
         video_id: None,
+        sealed: None,
     }))
 }
 
@@ -188,12 +197,14 @@ fn classify_platform(url: &str) -> Option<MediaSource> {
                 kind: SourceKind::Twitch,
                 url: format!("https://www.twitch.tv/videos/{id}"),
                 video_id: None,
+                sealed: None,
             }),
             // A live channel: twitch.tv/<channel>
             [channel] if is_channel_name(channel) => Some(MediaSource {
                 kind: SourceKind::Twitch,
                 url: format!("https://www.twitch.tv/{}", channel.to_ascii_lowercase()),
                 video_id: None,
+                sealed: None,
             }),
             _ => None,
         },
@@ -205,6 +216,7 @@ fn classify_platform(url: &str) -> Option<MediaSource> {
                 kind: SourceKind::Kick,
                 url: format!("https://kick.com/{}", channel.to_ascii_lowercase()),
                 video_id: None,
+                sealed: None,
             }),
             _ => None,
         },

@@ -269,6 +269,9 @@ mod tests {
                 created_at: 0,
                 max_participants: 25,
                 settings: RoomSettings::default(),
+                e2ee: false,
+                meta_sealed: None,
+                key_check: None,
             },
             32,
         )

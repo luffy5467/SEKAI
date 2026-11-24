@@ -16,6 +16,7 @@ import {
 import { Separator } from '~/components/ui/separator';
 import { Switch } from '~/components/ui/switch';
 import { ApiError, api } from '~/lib/api';
+import { useRoomCipherContext } from '~/lib/room-crypto';
 import { THEMES, type ThemeKey, type ThemeMode } from '~/lib/themes';
 import { cn } from '~/lib/utils';
 import { usePermissions, useRoomStore } from '~/stores/room-store';
@@ -49,6 +50,7 @@ const VISIBILITIES = [
  */
 export function SettingsPanel() {
   const room = useRoomStore((s) => s.room);
+  const cipher = useRoomCipherContext();
   const permissions = usePermissions();
   const canEdit = permissions?.canEditRoom ?? false;
 
@@ -112,11 +114,16 @@ export function SettingsPanel() {
     );
   }
 
-  const submitDetails = (event: React.FormEvent) => {
+  const submitDetails = async (event: React.FormEvent) => {
     event.preventDefault();
+    // An encrypted room's name and topic are sealed here; the server only ever
+    // receives ciphertext for them, and refuses plaintext.
+    const details =
+      room.e2ee && cipher
+        ? { metaSealed: await cipher.sealMeta({ name: name.trim(), topic: topic.trim() || null }) }
+        : { name: name.trim(), topic: topic.trim() || null };
     save.mutate({
-      name: name.trim(),
-      topic: topic.trim() || null,
+      ...details,
       visibility,
       category,
       maxParticipants,
@@ -143,7 +150,13 @@ export function SettingsPanel() {
             />
           </Field>
 
-          <Field label="Topic" htmlFor="room-topic" hint="Optional. Shown in the directory.">
+          <Field
+            label="Topic"
+            htmlFor="room-topic"
+            hint={
+              room.e2ee ? 'Optional. Encrypted like the name.' : 'Optional. Shown in the directory.'
+            }
+          >
             <Input
               id="room-topic"
               value={topic}
@@ -163,11 +176,13 @@ export function SettingsPanel() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {VISIBILITIES.map(([value, label]) => (
-                    <SelectItem key={value} value={value}>
-                      {label}
-                    </SelectItem>
-                  ))}
+                  {VISIBILITIES.filter(([value]) => !(room.e2ee && value === 'public')).map(
+                    ([value, label]) => (
+                      <SelectItem key={value} value={value}>
+                        {label}
+                      </SelectItem>
+                    ),
+                  )}
                 </SelectContent>
               </Select>
             </Field>

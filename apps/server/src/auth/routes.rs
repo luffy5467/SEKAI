@@ -4,7 +4,7 @@ use crate::{
     auth::{
         CurrentUser,
         cookies::{self, OAUTH_STATE_COOKIE, REFRESH_COOKIE},
-        google,
+        google, password,
         tokens::{self, WsTicket},
     },
     cache, db,
@@ -15,6 +15,7 @@ use crate::{
 };
 use axum::{
     Json, Router,
+    http::HeaderMap,
     extract::{ConnectInfo, Query, State},
     response::{IntoResponse, Redirect, Response},
     routing::{get, post},
@@ -27,6 +28,8 @@ use uuid::Uuid;
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/guest", post(guest_login))
+        .route("/register", post(register))
+        .route("/login", post(password_login))
         .route("/session", get(current_session).patch(update_profile))
         .route("/refresh", post(refresh))
         .route("/logout", post(logout))
@@ -60,6 +63,7 @@ struct GuestLoginRequest {
 async fn guest_login(
     State(state): State<AppState>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
     jar: CookieJar,
     Json(body): Json<GuestLoginRequest>,
 ) -> AppResult<Response> {
@@ -68,8 +72,8 @@ async fn guest_login(
     let decision = ratelimit::check(
         &mut redis,
         "guest_signup",
-        &peer.ip().to_string(),
-        20,
+        &caller(&state, &headers, peer),
+        state.config.limits.guest_signups_per_hour,
         std::time::Duration::from_secs(3600),
     )
     .await;
@@ -85,6 +89,201 @@ async fn guest_login(
 
     let user = db::users::create_guest(&state.db, &display_name).await?;
     issue_session(&state, jar, &user).await
+}
+
+// ---------------------------------------------------------------------------
+// Email + password (SEKAI)
+// ---------------------------------------------------------------------------
+
+/// Argon2 cost makes very long inputs a cheap DoS lever, so cap them.
+const PASSWORD_MIN_CHARS: usize = 10;
+const PASSWORD_MAX_CHARS: usize = 128;
+const EMAIL_MAX_CHARS: usize = 254;
+
+/// One message for every sign-in failure, so the response never reveals
+/// whether an address has an account.
+const BAD_CREDENTIALS: &str = "Email or password is incorrect.";
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RegisterRequest {
+    email: String,
+    password: String,
+    display_name: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PasswordLoginRequest {
+    email: String,
+    password: String,
+}
+
+/// Trim and lower-case; then a deliberately modest shape check. Real
+/// validation of an address is delivering mail to it.
+pub(crate) fn normalize_email(raw: &str) -> Result<String, AppError> {
+    let email = raw.trim().to_lowercase();
+    let invalid = || AppError::field("email", "Enter a valid email address.");
+
+    if email.is_empty() || email.chars().count() > EMAIL_MAX_CHARS {
+        return Err(invalid());
+    }
+    if email.chars().any(|c| c.is_whitespace() || c.is_control()) {
+        return Err(invalid());
+    }
+    let (local, domain) = email.split_once('@').ok_or_else(invalid)?;
+    if local.is_empty() || domain.contains('@') {
+        return Err(invalid());
+    }
+    let labels: Vec<&str> = domain.split('.').collect();
+    if labels.len() < 2 || labels.iter().any(|label| label.is_empty()) {
+        return Err(invalid());
+    }
+    Ok(email)
+}
+
+pub(crate) fn validate_password(password: &str) -> Result<(), AppError> {
+    let length = password.chars().count();
+    if length < PASSWORD_MIN_CHARS {
+        return Err(AppError::field(
+            "password",
+            "Use at least 10 characters.",
+        ));
+    }
+    if length > PASSWORD_MAX_CHARS {
+        return Err(AppError::field("password", "Use at most 128 characters."));
+    }
+    Ok(())
+}
+
+/// Argon2 is deliberately slow; keep it off the async executor.
+async fn hash_blocking(raw: String) -> AppResult<String> {
+    tokio::task::spawn_blocking(move || password::hash_password(&raw))
+        .await
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("hash task failed: {e}")))?
+        .map_err(AppError::Internal)
+}
+
+async fn verify_blocking(raw: String, hash: String) -> AppResult<bool> {
+    tokio::task::spawn_blocking(move || password::verify_password(&raw, &hash))
+        .await
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("verify task failed: {e}")))
+}
+
+/// A real Argon2 hash of a random value, verified against when the address
+/// has no account, so a miss costs the same time as a wrong password.
+fn decoy_hash() -> &'static str {
+    static DECOY: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    DECOY.get_or_init(|| {
+        password::hash_password(&Uuid::new_v4().to_string()).unwrap_or_default()
+    })
+}
+
+/// CSRF defence for the two endpoints that act on the refresh cookie, in
+/// addition to `SameSite=Lax`: a browser request whose `Origin` is not one of
+/// our web origins is refused before any cookie is read or written. Requests
+/// without `Origin` (non-browser clients) are allowed — they cannot carry a
+/// victim's cookies. `Origin: null` (sandboxed or opaque contexts) is refused.
+fn reject_cross_site(state: &AppState, headers: &HeaderMap) -> Result<(), AppError> {
+    match headers.get(axum::http::header::ORIGIN) {
+        None => Ok(()),
+        Some(origin) => {
+            let allowed = state.config.allowed_origins();
+            if origin_allowed(origin.to_str().ok(), &allowed) {
+                Ok(())
+            } else {
+                Err(AppError::Forbidden("Cross-site request refused."))
+            }
+        }
+    }
+}
+
+fn origin_allowed(origin: Option<&str>, allowed: &[String]) -> bool {
+    origin.is_some_and(|value| allowed.iter().any(|candidate| candidate == value))
+}
+
+/// The rate-limit subject for an unauthenticated request: the same resolver
+/// as the general throttle (`client_ip::resolve`), never the raw TCP peer or
+/// a forwarded header on its own.
+fn caller(state: &AppState, headers: &HeaderMap, peer: SocketAddr) -> String {
+    crate::client_ip::resolve(headers, peer.ip(), &state.config.client_ip).bucket()
+}
+
+async fn limit(state: &AppState, scope: &str, subject: &str, max: u32, window_secs: u64) -> AppResult<()> {
+    let mut redis = state.redis.clone();
+    let decision = ratelimit::check(
+        &mut redis,
+        scope,
+        subject,
+        max,
+        std::time::Duration::from_secs(window_secs),
+    )
+    .await;
+    if decision.allowed {
+        Ok(())
+    } else {
+        Err(AppError::RateLimited {
+            retry_after_ms: decision.retry_after_ms,
+        })
+    }
+}
+
+async fn register(
+    State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    jar: CookieJar,
+    Json(body): Json<RegisterRequest>,
+) -> AppResult<Response> {
+    let per_hour = state.config.limits.registrations_per_hour;
+    limit(&state, "register", &caller(&state, &headers, peer), per_hour, 3600).await?;
+
+    let email = normalize_email(&body.email)?;
+    validate_password(&body.password)?;
+    let display_name = util::normalize_display_name(&body.display_name);
+    validate_display_name(&display_name)?;
+
+    let hash = hash_blocking(body.password).await?;
+    let user = db::users::create_email_user(&state.db, &email, &display_name, &hash)
+        .await?
+        .ok_or_else(|| {
+            AppError::Conflict("An account with that email already exists. Try signing in.".into())
+        })?;
+
+    tracing::info!(user_id = %user.id, "email account created");
+    issue_session(&state, jar, &user).await
+}
+
+async fn password_login(
+    State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    jar: CookieJar,
+    Json(body): Json<PasswordLoginRequest>,
+) -> AppResult<Response> {
+    limit(&state, "login_ip", &caller(&state, &headers, peer), 30, 900).await?;
+
+    // A malformed address cannot have an account; answer exactly as for a miss.
+    let Ok(email) = normalize_email(&body.email) else {
+        return Err(AppError::BadRequest(BAD_CREDENTIALS.into()));
+    };
+    if body.password.chars().count() > PASSWORD_MAX_CHARS {
+        return Err(AppError::BadRequest(BAD_CREDENTIALS.into()));
+    }
+    // Per-account limit slows targeted guessing from many IPs.
+    limit(&state, "login_email", &email, 10, 900).await?;
+
+    let found = db::users::find_email_credentials(&state.db, &email).await?;
+    let (user, hash) = match found {
+        Some((user, hash)) => (Some(user), hash),
+        None => (None, decoy_hash().to_string()),
+    };
+
+    let matches = verify_blocking(body.password, hash).await?;
+    match user {
+        Some(user) if matches => issue_session(&state, jar, &user).await,
+        _ => Err(AppError::BadRequest(BAD_CREDENTIALS.into())),
+    }
 }
 
 fn validate_display_name(name: &str) -> Result<(), AppError> {
@@ -150,7 +349,12 @@ async fn update_profile(
 /// or a stolen cookie, and we cannot tell which — so the entire token family is
 /// revoked and the user re-authenticates. This is the standard OAuth 2.1
 /// recommendation for public clients.
-async fn refresh(State(state): State<AppState>, jar: CookieJar) -> AppResult<Response> {
+async fn refresh(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    jar: CookieJar,
+) -> AppResult<Response> {
+    reject_cross_site(&state, &headers)?;
     let presented = jar
         .get(REFRESH_COOKIE)
         .map(|cookie| cookie.value().to_owned())
@@ -195,7 +399,15 @@ async fn refresh(State(state): State<AppState>, jar: CookieJar) -> AppResult<Res
     issue_session_in_family(&state, jar, &user, record.family_id).await
 }
 
-async fn logout(State(state): State<AppState>, jar: CookieJar) -> AppResult<Response> {
+async fn logout(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    jar: CookieJar,
+) -> AppResult<Response> {
+    // Without this, any site could submit a form here: the browser withholds
+    // the SameSite=Lax cookie (so nothing is revoked) but still applies the
+    // clearing Set-Cookie below, signing the visitor out.
+    reject_cross_site(&state, &headers)?;
     if let Some(cookie) = jar.get(REFRESH_COOKIE) {
         let hash = util::sha256_hex(cookie.value());
         if let Some(record) = db::users::find_refresh_token(&state.db, &hash).await? {
@@ -465,5 +677,58 @@ mod tests {
         assert!(validate_display_name("日本語名").is_ok());
         assert!(validate_display_name("日本").is_ok());
         assert!(validate_display_name(&"あ".repeat(33)).is_err());
+    }
+}
+
+#[cfg(test)]
+mod origin_tests {
+    use super::origin_allowed;
+
+    #[test]
+    fn only_exact_configured_origins_are_allowed() {
+        let allowed = vec!["https://sekai.example".to_owned()];
+        assert!(origin_allowed(Some("https://sekai.example"), &allowed));
+        for bad in [
+            "https://attacker.example",
+            "https://sekai.example.attacker.example",
+            "http://sekai.example",
+            "https://sekai.example:444",
+            "null",
+            "",
+        ] {
+            assert!(!origin_allowed(Some(bad), &allowed), "{bad}");
+        }
+        assert!(!origin_allowed(None, &allowed), "a non-UTF-8 Origin is refused");
+    }
+}
+
+#[cfg(test)]
+mod email_account_tests {
+    use super::{normalize_email, validate_password};
+
+    #[test]
+    fn normalises_valid_addresses() {
+        assert_eq!(normalize_email("  Luffy@Example.COM ").unwrap(), "luffy@example.com");
+        assert_eq!(normalize_email("a.b+tag@sub.example.jp").unwrap(), "a.b+tag@sub.example.jp");
+    }
+
+    #[test]
+    fn rejects_malformed_addresses() {
+        for bad in [
+            "", "plain", "@example.com", "a@", "a@b", "a@@b.com", "a@b..com",
+            "a b@example.com", "a@example.com.", "a\u{0}@example.com",
+        ] {
+            assert!(normalize_email(bad).is_err(), "accepted {bad:?}");
+        }
+        let long = format!("{}@example.com", "a".repeat(250));
+        assert!(normalize_email(&long).is_err());
+    }
+
+    #[test]
+    fn enforces_password_length() {
+        assert!(validate_password("short").is_err());
+        assert!(validate_password("exactly10!").is_ok());
+        assert!(validate_password(&"x".repeat(128)).is_ok());
+        assert!(validate_password(&"x".repeat(129)).is_err());
     }
 }

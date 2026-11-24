@@ -111,6 +111,9 @@ impl Hub {
             created_at: record.created_at.timestamp_millis(),
             max_participants: record.max_participants,
             settings: record.settings.0.clone(),
+            e2ee: record.e2ee,
+            meta_sealed: record.meta_sealed.clone(),
+            key_check: record.key_check.clone(),
         };
 
         let room = Arc::new(Room::new(info, self.config.realtime.send_buffer));

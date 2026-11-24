@@ -24,7 +24,9 @@
     "db:prepare": "cargo sqlx prepare --workspace -- --manifest-path apps/server/Cargo.toml",
     "infra:up": "docker compose up -d postgres redis",
     "infra:down": "docker compose down",
-    "infra:reset": "docker compose down -v && docker compose up -d postgres redis"
+    "infra:reset": "docker compose down -v && docker compose up -d postgres redis",
+    "test:e2e": "pnpm --filter @sekai/e2e test",
+    "test:e2e:proxy": "pnpm --filter @sekai/e2e exec playwright test -c playwright.proxy.config.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.6",

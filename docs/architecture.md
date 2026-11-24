@@ -129,6 +129,14 @@ Chosen deliberately, and each one is a trade rather than an oversight:
 
 ## Security posture
 
+- **Cookie endpoints check `Origin`.** `/api/auth/refresh` and `/api/auth/logout`
+  are the only endpoints that act on a cookie. In addition to `SameSite=Lax`,
+  they refuse (403, before touching any cookie) a request whose `Origin` is not
+  one of the configured web origins. That includes `Origin: null`, sent by
+  sandboxed and opaque contexts. A request with **no** `Origin` is allowed:
+  browsers send one on every cross-site POST, so a missing header means a
+  non-browser client, which cannot carry a victim's cookie. Without this check,
+  any site could sign a visitor out by posting a form to `/logout`.
 - **Authorisation is server-side, always.** Hidden UI is a rendering hint, not
   a control. Permissions are re-resolved per action, so a token minted before a
   demotion carries no stale authority.

@@ -1,5 +1,8 @@
+import { generateRoomKey } from '@playercn/protocol';
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
+import { Lock } from 'lucide-react';
 import { useState } from 'react';
+import { AccountForm } from '~/components/account-form';
 import { SiteHeader } from '~/components/site-header';
 import { Button } from '~/components/ui/button';
 import { Input } from '~/components/ui/input';
@@ -15,6 +18,7 @@ import { Spinner } from '~/components/ui/spinner';
 import { Switch } from '~/components/ui/switch';
 import { useSession } from '~/hooks/use-session';
 import { ApiError, api } from '~/lib/api';
+import { rememberRoomKey, sealNewRoom } from '~/lib/room-crypto';
 import { cn } from '~/lib/utils';
 
 export const Route = createFileRoute('/rooms/new')({
@@ -38,7 +42,7 @@ const VISIBILITIES = [
 ] as const;
 
 function NewRoomPage() {
-  const { state, signInWithGoogle } = useSession();
+  const { state } = useSession();
   const navigate = useNavigate();
 
   const [name, setName] = useState('');
@@ -48,6 +52,8 @@ function NewRoomPage() {
   const [password, setPassword] = useState('');
   const [allowGuestQueue, setAllowGuestQueue] = useState(true);
   const [allowGuestControl, setAllowGuestControl] = useState(false);
+  // On by default: the room name, chat and queue are sealed in the browser.
+  const [encrypted, setEncrypted] = useState(true);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
 
@@ -64,12 +70,7 @@ function NewRoomPage() {
   // people into a dead end: they name themselves, sign in, and are then told
   // guests cannot own a room.
   if (state.status === 'anonymous' || state.user.kind === 'guest') {
-    return (
-      <SignInToCreate
-        onContinue={() => signInWithGoogle('/rooms/new')}
-        guest={state.status === 'authenticated'}
-      />
-    );
+    return <SignInToCreate guest={state.status === 'authenticated'} />;
   }
 
   async function submit(event: React.FormEvent) {
@@ -83,10 +84,17 @@ function NewRoomPage() {
 
     setBusy(true);
     try {
+      // For an encrypted room the key is made here and never sent: the server
+      // receives only the sealed name and a key check.
+      const key = encrypted ? generateRoomKey() : null;
+      const sealedFields = key
+        ? { e2ee: true, ...(await sealNewRoom(key, { name: name.trim(), topic: null })) }
+        : {};
       const room = await api<{ slug: string }>('/api/rooms', {
         method: 'POST',
         body: {
-          name: name.trim(),
+          name: key ? 'Encrypted room' : name.trim(),
+          ...sealedFields,
           visibility,
           category,
           maxParticipants,
@@ -95,6 +103,7 @@ function NewRoomPage() {
           ...(password.trim() ? { password: password.trim() } : {}),
         },
       });
+      if (key) rememberRoomKey(room.slug, key);
       void navigate({ to: '/rooms/$slug', params: { slug: room.slug } });
     } catch (cause) {
       setErrors(
@@ -132,6 +141,32 @@ function NewRoomPage() {
             {errors.name ? <p className="text-xs text-destructive">{errors.name}</p> : null}
           </div>
 
+          <div className="flex items-start justify-between gap-4 rounded-md border p-3">
+            <Label
+              htmlFor="room-e2ee"
+              className="min-w-0 flex-1 cursor-pointer flex-col items-start gap-1 font-normal"
+            >
+              <span className="flex items-center gap-1.5 text-sm">
+                <Lock className="size-3.5 text-emerald-500" />
+                End-to-end encrypted
+              </span>
+              <span className="block text-xs text-muted-foreground">
+                The room name, chat and queue are encrypted in your browser. SEKAI’s servers can’t
+                read them — only people with the invite link can. Encrypted rooms can’t be listed
+                publicly, and playlist import is off.
+              </span>
+            </Label>
+            <Switch
+              id="room-e2ee"
+              checked={encrypted}
+              onCheckedChange={(next) => {
+                setEncrypted(next);
+                if (next && visibility === 'public') setVisibility('private');
+              }}
+              className="mt-0.5 shrink-0"
+            />
+          </div>
+
           <fieldset>
             <legend className="mb-2 text-sm font-medium">Who can find it</legend>
             <div className="grid gap-2 sm:grid-cols-3">
@@ -140,6 +175,7 @@ function NewRoomPage() {
                   key={value}
                   className={cn(
                     'cursor-pointer rounded-md border p-2.5 transition-colors',
+                    encrypted && value === 'public' && 'pointer-events-none opacity-40',
                     visibility === value
                       ? 'border-primary bg-primary/5'
                       : 'hover:border-foreground/25',
@@ -150,6 +186,7 @@ function NewRoomPage() {
                     name="visibility"
                     value={value}
                     checked={visibility === value}
+                    disabled={encrypted && value === 'public'}
                     onChange={() => setVisibility(value)}
                     className="sr-only"
                   />
@@ -227,7 +264,10 @@ function NewRoomPage() {
               ] as const
             ).map(([id, checked, setter, label, hint]) => (
               <div key={id} className="flex items-start justify-between gap-4">
-                <Label htmlFor={id} className="min-w-0 cursor-pointer font-normal">
+                <Label
+                  htmlFor={id}
+                  className="min-w-0 flex-1 cursor-pointer flex-col items-start gap-0.5 font-normal"
+                >
                   <span className="block text-sm">{label}</span>
                   <span className="block text-xs text-muted-foreground">{hint}</span>
                 </Label>
@@ -255,20 +295,21 @@ function NewRoomPage() {
  * A guest can join anything but cannot own a room: an anonymous owner cannot be
  * contacted or held responsible for a public one (ADR 0007).
  */
-function SignInToCreate({ onContinue, guest }: { onContinue: () => void; guest: boolean }) {
+function SignInToCreate({ guest }: { guest: boolean }) {
   return (
     <div className="min-h-dvh">
       <SiteHeader />
-      <main className="grid place-items-center px-6 py-24">
-        <div className="max-w-sm space-y-4 text-center">
+      <main className="mx-auto grid w-full max-w-sm gap-6 px-6 py-16">
+        <div className="space-y-2">
           <h1 className="text-lg font-semibold tracking-tight">Sign in to create a room</h1>
           <p className="text-sm text-muted-foreground">
             {guest
-              ? 'You are signed in as a guest, which is enough to join any room. Creating one needs a Google account so the room has an owner who can moderate it.'
-              : 'Joining a room only needs a name, but creating one needs a Google account so the room has an owner who can moderate it.'}
+              ? 'You are signed in as a guest, which is enough to join any room. Creating one needs an account so the room has an owner who can moderate it.'
+              : 'Joining a room only needs a name, but creating one needs an account so the room has an owner who can moderate it.'}
           </p>
-          <Button onClick={onContinue}>Continue with Google</Button>
         </div>
+        {/* Signing in updates the session, which re-renders this page as the form. */}
+        <AccountForm initialMode="register" returnTo="/rooms/new" />
       </main>
     </div>
   );

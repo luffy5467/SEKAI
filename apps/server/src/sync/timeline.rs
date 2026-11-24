@@ -498,6 +498,7 @@ mod tests {
                 kind: SourceKind::File,
                 url: "https://cdn.example.com/clip.mp4".into(),
                 video_id: None,
+                sealed: None,
             },
             None,
             None,

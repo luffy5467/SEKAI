@@ -1,6 +1,8 @@
+import { fileURLToPath } from 'node:url';
 import tailwindcss from '@tailwindcss/vite';
 import { tanstackStart } from '@tanstack/react-start/plugin/vite';
 import viteReact from '@vitejs/plugin-react';
+import { nitro } from 'nitro/vite';
 import { defineConfig } from 'vite';
 
 // Prerendering is what used to make the Docker build take five minutes: the
@@ -9,6 +11,15 @@ import { defineConfig } from 'vite';
 // to server-render, so it is only worth paying that cost when a build
 // explicitly asks for it.
 const prerender = process.env.PRERENDER === '1';
+
+// Vercel builds go through Nitro, which emits the platform's output format.
+// Every other build (Docker, `node server.js`) keeps the plain Start output,
+// so Nitro is only added when a target platform is named.
+const nitroTarget = Boolean(process.env.VERCEL || process.env.NITRO_PRESET);
+
+// `/api/**` is proxied to the API at runtime by src/routes/api.$.ts (see
+// src/server/api-proxy.ts), not by a build-time route rule, so the proxy
+// secret is read from the environment per request and never bundled.
 
 export default defineConfig({
   plugins: [
@@ -20,6 +31,7 @@ export default defineConfig({
       },
       pages: prerender ? [{ path: '/' }] : [],
     }),
+    ...(nitroTarget ? [nitro()] : []),
     viteReact(),
   ],
 
@@ -30,6 +42,13 @@ export default defineConfig({
   // deployed client sends its API and WebSocket traffic to the web host instead
   // of the API host.
   envPrefix: ['VITE_', 'PUBLIC_'],
+
+  // `~/…` imports are declared in tsconfig `paths`. The production build
+  // happened to resolve them, but the dev SSR runner does not read tsconfig,
+  // so every server-rendered page failed with "Cannot find module '~/…'".
+  resolve: {
+    alias: { '~': fileURLToPath(new URL('./src', import.meta.url)) },
+  },
 
   // Prerendering boots a preview server on an ephemeral port and fetches the
   // pages over the loopback interface. Left to default, Vite binds the literal

@@ -1,0 +1,15 @@
+# Railway: build and run the SEKAI API from this directory's Dockerfile.
+# In the Railway service settings, set Root Directory to `apps/server`
+# (otherwise Railway builds the repository root as a Node app and fails).
+# Required variables are listed in docs/DEPLOY_RAILWAY.md.
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+watchPatterns = ["/apps/server/**"]
+
+[deploy]
+healthcheckPath = "/health/ready"
+healthcheckTimeout = 120
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 5

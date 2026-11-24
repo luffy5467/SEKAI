@@ -60,6 +60,14 @@ struct CreateRoomRequest {
     allow_guest_queue: bool,
     #[serde(default)]
     initial_video_ids: Vec<String>,
+    /// End-to-end encrypted room. `name` is then ignored: the real name is in
+    /// `meta_sealed`, which only members' browsers can open.
+    #[serde(default)]
+    e2ee: bool,
+    #[serde(default)]
+    meta_sealed: Option<String>,
+    #[serde(default)]
+    key_check: Option<String>,
 }
 
 fn default_visibility() -> String {
@@ -104,6 +112,9 @@ struct RoomResponse {
     /// The caller's role, so the UI can render the right controls immediately
     /// rather than waiting for the socket to say.
     your_role: Option<String>,
+    e2ee: bool,
+    meta_sealed: Option<String>,
+    key_check: Option<String>,
 }
 
 async fn create_room(
@@ -114,9 +125,7 @@ async fn create_room(
     // Guests can join anything but cannot own rooms — an anonymous owner
     // cannot be contacted, moderated or held responsible for a public room.
     if claims.is_guest() {
-        return Err(AppError::Forbidden(
-            "Sign in with Google to create a room.",
-        ));
+        return Err(AppError::Forbidden("Sign in to create a room."));
     }
 
     let mut redis = state.redis.clone();
@@ -135,13 +144,37 @@ async fn create_room(
         });
     }
 
-    let name = body.name.trim();
-    if name.chars().count() < 2 || name.chars().count() > 60 {
-        return Err(AppError::field("name", "Use between 2 and 60 characters."));
-    }
     if !VISIBILITIES.contains(&body.visibility.as_str()) {
         return Err(AppError::field("visibility", "Unknown visibility."));
     }
+
+    // An encrypted room's name arrives sealed; the plaintext `name` field is
+    // replaced by a placeholder so it can never be stored by mistake.
+    let (name, meta_sealed, key_check) = if body.e2ee {
+        let meta = body
+            .meta_sealed
+            .as_deref()
+            .filter(|m| crate::e2ee::is_sealed(m, crate::e2ee::MAX_SEALED_META))
+            .ok_or_else(|| AppError::field("metaSealed", "Encrypted room details are missing."))?;
+        let check = body
+            .key_check
+            .as_deref()
+            .filter(|c| crate::e2ee::is_sealed(c, crate::e2ee::MAX_KEY_CHECK))
+            .ok_or_else(|| AppError::field("keyCheck", "Encrypted room key check is missing."))?;
+        if body.visibility == "public" {
+            return Err(AppError::field(
+                "visibility",
+                "Encrypted rooms can't be listed publicly. Choose private or unlisted.",
+            ));
+        }
+        (crate::e2ee::PLACEHOLDER_ROOM_NAME, Some(meta), Some(check))
+    } else {
+        let name = body.name.trim();
+        if name.chars().count() < 2 || name.chars().count() > 60 {
+            return Err(AppError::field("name", "Use between 2 and 60 characters."));
+        }
+        (name, None, None)
+    };
     if !CATEGORIES.contains(&body.category.as_str()) {
         return Err(AppError::field("category", "Unknown category."));
     }
@@ -173,13 +206,21 @@ async fn create_room(
             &slug,
             NewRoom {
                 name,
-                topic: body.topic.as_deref().map(str::trim).filter(|t| !t.is_empty()),
+                // An encrypted room's topic lives inside its sealed metadata.
+                topic: if body.e2ee {
+                    None
+                } else {
+                    body.topic.as_deref().map(str::trim).filter(|t| !t.is_empty())
+                },
                 visibility: &body.visibility,
                 category: &body.category,
                 host_id: claims.sub,
                 password_hash: password_hash.as_deref(),
                 max_participants: body.max_participants,
                 settings: settings.clone(),
+                e2ee: body.e2ee,
+                meta_sealed,
+                key_check,
             },
         )
         .await
@@ -198,8 +239,9 @@ async fn create_room(
     })?;
 
     // Seed the queue from a template, best-effort: a failed lookup must not
-    // undo a successfully created room.
-    if !body.initial_video_ids.is_empty() {
+    // undo a successfully created room. Skipped for encrypted rooms, because
+    // seeding writes plaintext queue rows.
+    if !body.e2ee && !body.initial_video_ids.is_empty() {
         let youtube = YouTube::new(state.config.youtube.clone(), state.http.clone());
         let mut redis = state.redis.clone();
 
@@ -261,6 +303,9 @@ fn to_response(
         settings: room.settings.0.clone(),
         created_at: room.created_at.timestamp_millis(),
         your_role: your_role.map(|r| r.as_str().to_string()),
+        e2ee: room.e2ee,
+        meta_sealed: room.meta_sealed.clone(),
+        key_check: room.key_check.clone(),
     }
 }
 
@@ -757,6 +802,9 @@ struct UpdateRoomRequest {
     theme: Option<String>,
     #[serde(default)]
     theme_mode: Option<String>,
+    /// New sealed name/topic for an encrypted room.
+    #[serde(default)]
+    meta_sealed: Option<String>,
 }
 
 /// Distinguish "field absent" from "field set to null" — the difference between
@@ -782,6 +830,30 @@ async fn update_room(
     let role = current_role(&state, id, claims.sub).await?;
     if !permissions::resolve(role, &room.settings.0).can_edit_room {
         return Err(AppError::Forbidden("Only the host can change room settings."));
+    }
+
+    if room.e2ee {
+        // Plaintext name or topic would defeat the encryption; renames arrive
+        // sealed. Public listing is refused for the same reason as at creation.
+        if body.name.is_some() || body.topic.is_some() {
+            return Err(AppError::field(
+                "name",
+                "This room is end-to-end encrypted; its name can only be changed from a member's browser.",
+            ));
+        }
+        if body.visibility.as_deref() == Some("public") {
+            return Err(AppError::field(
+                "visibility",
+                "Encrypted rooms can't be listed publicly.",
+            ));
+        }
+        if let Some(meta) = &body.meta_sealed
+            && !crate::e2ee::is_sealed(meta, crate::e2ee::MAX_SEALED_META)
+        {
+            return Err(AppError::field("metaSealed", "Malformed encrypted room details."));
+        }
+    } else if body.meta_sealed.is_some() {
+        return Err(AppError::field("metaSealed", "This room is not encrypted."));
     }
 
     if let Some(name) = &body.name
@@ -859,6 +931,7 @@ async fn update_room(
             max_participants: body.max_participants.filter(|n| (2..=100).contains(n)),
             password_hash,
             settings: Some(settings),
+            meta_sealed: body.meta_sealed,
         },
     )
     .await?;
@@ -872,6 +945,7 @@ async fn update_room(
         info.category = updated.category.clone();
         info.settings = updated.settings.0.clone();
         info.max_participants = updated.max_participants;
+        info.meta_sealed = updated.meta_sealed.clone();
         let snapshot = info.clone();
         drop(info);
 

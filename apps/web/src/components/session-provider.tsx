@@ -55,6 +55,35 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     return session.user;
   }, []);
 
+  const applySession = useCallback((session: SessionResponse) => {
+    setAccessToken(session.accessToken);
+    scheduleRefresh(session.expiresIn);
+    setState({ status: 'authenticated', user: session.user });
+    return session.user;
+  }, []);
+
+  const signInWithPassword = useCallback(
+    async (email: string, password: string) =>
+      applySession(
+        await api<SessionResponse>('/api/auth/login', {
+          method: 'POST',
+          body: { email, password },
+        }),
+      ),
+    [applySession],
+  );
+
+  const register = useCallback(
+    async (email: string, password: string, displayName: string) =>
+      applySession(
+        await api<SessionResponse>('/api/auth/register', {
+          method: 'POST',
+          body: { email, password, displayName },
+        }),
+      ),
+    [applySession],
+  );
+
   const signInWithGoogle = useCallback((returnTo: string) => {
     // A full navigation, not fetch: the OAuth flow needs the browser to follow
     // redirects and set cookies on the way back. It must be an absolute API URL
@@ -84,8 +113,16 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const value = useMemo<SessionContextValue>(
-    () => ({ state, signInAsGuest, signInWithGoogle, signOut, rename }),
-    [state, signInAsGuest, signInWithGoogle, signOut, rename],
+    () => ({
+      state,
+      signInAsGuest,
+      signInWithGoogle,
+      signInWithPassword,
+      register,
+      signOut,
+      rename,
+    }),
+    [state, signInAsGuest, signInWithGoogle, signInWithPassword, register, signOut, rename],
   );
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;

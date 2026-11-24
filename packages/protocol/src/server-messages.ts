@@ -43,6 +43,10 @@ export const roomSnapshot = z.object({
     theme: z.string(),
     themeMode: z.enum(['light', 'dark']),
   }),
+  /** End-to-end encrypted: `name` is a placeholder; open `metaSealed`. */
+  e2ee: z.boolean(),
+  metaSealed: z.string().nullable(),
+  keyCheck: z.string().nullable(),
 });
 export type RoomSnapshot = z.infer<typeof roomSnapshot>;
 
