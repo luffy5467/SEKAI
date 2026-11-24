@@ -1109,8 +1109,8 @@ impl Session {
                 self.room.id,
                 "role_changed",
                 &match new_role {
-                    Role::Cohost => format!("{} is now a co-host.", participant.user.display_name),
-                    _ => format!("{} is now a member.", participant.user.display_name),
+                    Role::Cohost => format!("{} is now a moderator.", participant.user.display_name),
+                    _ => format!("{} is now a viewer.", participant.user.display_name),
                 },
             )
             .await

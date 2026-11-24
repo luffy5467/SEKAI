@@ -102,7 +102,7 @@ const FEATURES = [
   },
   {
     icon: Users,
-    title: 'Hosts and co-hosts',
+    title: 'Hosts and moderators',
     body: 'Promote people you trust, nominate who inherits the room, and get it back automatically when you return.',
   },
   {

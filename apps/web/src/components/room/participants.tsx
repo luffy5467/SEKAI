@@ -11,13 +11,14 @@ import {
   DropdownMenuTrigger,
 } from '~/components/ui/dropdown-menu';
 import { ScrollArea } from '~/components/ui/scroll-area';
+import { ROLE_LABEL } from '~/lib/roles';
 import type { RoomSocket } from '~/realtime/socket';
 import { useParticipants, usePermissions, useRoomStore, useSelf } from '~/stores/room-store';
 
 /**
  * Who is in the room, and what the host can do about it.
  *
- * Rank order is host, then co-hosts, then everyone else by join time — the same
+ * Rank order is host, then moderators (cohost), then everyone else by join time — the same
  * order the server promotes through when a host leaves, so the list doubles as
  * a preview of who inherits the room.
  */
@@ -105,14 +106,14 @@ function ParticipantRow({
         <p className="flex items-center gap-1 text-xs text-muted-foreground">
           {isHost ? (
             <>
-              <Crown className="size-3" /> Host
+              <Crown className="size-3" /> {ROLE_LABEL.host}
             </>
           ) : role === 'cohost' ? (
             <>
-              <Shield className="size-3" /> Co-host
+              <Shield className="size-3" /> {ROLE_LABEL.cohost}
             </>
           ) : (
-            'Member'
+            ROLE_LABEL[role]
           )}
           {isSuccessor ? (
             <Badge variant="secondary" className="ml-1 gap-1 px-1.5 py-0 text-[10px]">
@@ -138,14 +139,14 @@ function ParticipantRow({
                   onClick={() => socket?.send({ t: 'set_role', userId: user.id, role: 'member' })}
                 >
                   <UserMinus className="size-4" />
-                  Demote to member
+                  Make viewer
                 </DropdownMenuItem>
               ) : (
                 <DropdownMenuItem
                   onClick={() => socket?.send({ t: 'set_role', userId: user.id, role: 'cohost' })}
                 >
                   <UserPlus className="size-4" />
-                  Make co-host
+                  Make moderator
                 </DropdownMenuItem>
               )
             ) : null}
