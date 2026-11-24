@@ -1,3 +1,4 @@
+import { useNavigate } from '@tanstack/react-router';
 import { LogOut, Pencil, UserRound } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
@@ -34,8 +35,18 @@ import { useSession } from '~/hooks/use-session';
  * the name *is* the whole account.
  */
 export function AccountMenu() {
-  const { state, signInWithGoogle, signOut } = useSession();
+  const { state, signOut } = useSession();
   const [renaming, setRenaming] = useState(false);
+  const navigate = useNavigate();
+  const goToSignIn = () =>
+    void navigate({
+      to: '/sign-in',
+      search: {
+        mode: 'signin',
+        returnTo:
+          typeof window === 'undefined' ? '/' : window.location.pathname + window.location.search,
+      },
+    });
 
   if (state.status === 'loading') {
     return <div className="size-7 animate-pulse rounded-full bg-muted" aria-hidden />;
@@ -43,15 +54,7 @@ export function AccountMenu() {
 
   if (state.status === 'anonymous') {
     return (
-      <Button
-        variant="ghost"
-        size="sm"
-        onClick={() =>
-          signInWithGoogle(
-            typeof window === 'undefined' ? '/' : window.location.pathname + window.location.search,
-          )
-        }
-      >
+      <Button variant="ghost" size="sm" onClick={goToSignIn}>
         <UserRound className="size-4" />
         <span className="hidden sm:inline">Sign in</span>
       </Button>
@@ -86,7 +89,11 @@ export function AccountMenu() {
             <DropdownMenuLabel className="flex flex-col gap-0.5">
               <span className="truncate text-sm font-medium">{user.displayName}</span>
               <span className="text-xs font-normal text-muted-foreground">
-                {user.kind === 'guest' ? 'Guest — this device only' : 'Google account'}
+                {user.kind === 'guest'
+                  ? 'Guest — this device only'
+                  : user.kind === 'email'
+                    ? 'Email account'
+                    : 'Google account'}
               </span>
             </DropdownMenuLabel>
           </DropdownMenuGroup>
@@ -96,17 +103,9 @@ export function AccountMenu() {
             Change name
           </DropdownMenuItem>
           {user.kind === 'guest' ? (
-            <DropdownMenuItem
-              onClick={() =>
-                signInWithGoogle(
-                  typeof window === 'undefined'
-                    ? '/'
-                    : window.location.pathname + window.location.search,
-                )
-              }
-            >
+            <DropdownMenuItem onClick={goToSignIn}>
               <UserRound className="size-4" />
-              Sign in with Google
+              Sign in or create account
             </DropdownMenuItem>
           ) : null}
           <DropdownMenuSeparator />

@@ -20,6 +20,8 @@ export interface SessionContextValue {
   state: SessionState;
   signInAsGuest: (displayName: string) => Promise<UserSummary>;
   signInWithGoogle: (returnTo: string) => void;
+  signInWithPassword: (email: string, password: string) => Promise<UserSummary>;
+  register: (email: string, password: string, displayName: string) => Promise<UserSummary>;
   signOut: () => Promise<void>;
   rename: (displayName: string) => Promise<UserSummary>;
 }

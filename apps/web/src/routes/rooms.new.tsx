@@ -1,5 +1,6 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { useState } from 'react';
+import { AccountForm } from '~/components/account-form';
 import { SiteHeader } from '~/components/site-header';
 import { Button } from '~/components/ui/button';
 import { Input } from '~/components/ui/input';
@@ -38,7 +39,7 @@ const VISIBILITIES = [
 ] as const;
 
 function NewRoomPage() {
-  const { state, signInWithGoogle } = useSession();
+  const { state } = useSession();
   const navigate = useNavigate();
 
   const [name, setName] = useState('');
@@ -64,12 +65,7 @@ function NewRoomPage() {
   // people into a dead end: they name themselves, sign in, and are then told
   // guests cannot own a room.
   if (state.status === 'anonymous' || state.user.kind === 'guest') {
-    return (
-      <SignInToCreate
-        onContinue={() => signInWithGoogle('/rooms/new')}
-        guest={state.status === 'authenticated'}
-      />
-    );
+    return <SignInToCreate guest={state.status === 'authenticated'} />;
   }
 
   async function submit(event: React.FormEvent) {
@@ -255,20 +251,21 @@ function NewRoomPage() {
  * A guest can join anything but cannot own a room: an anonymous owner cannot be
  * contacted or held responsible for a public one (ADR 0007).
  */
-function SignInToCreate({ onContinue, guest }: { onContinue: () => void; guest: boolean }) {
+function SignInToCreate({ guest }: { guest: boolean }) {
   return (
     <div className="min-h-dvh">
       <SiteHeader />
-      <main className="grid place-items-center px-6 py-24">
-        <div className="max-w-sm space-y-4 text-center">
+      <main className="mx-auto grid w-full max-w-sm gap-6 px-6 py-16">
+        <div className="space-y-2">
           <h1 className="text-lg font-semibold tracking-tight">Sign in to create a room</h1>
           <p className="text-sm text-muted-foreground">
             {guest
-              ? 'You are signed in as a guest, which is enough to join any room. Creating one needs a Google account so the room has an owner who can moderate it.'
-              : 'Joining a room only needs a name, but creating one needs a Google account so the room has an owner who can moderate it.'}
+              ? 'You are signed in as a guest, which is enough to join any room. Creating one needs an account so the room has an owner who can moderate it.'
+              : 'Joining a room only needs a name, but creating one needs an account so the room has an owner who can moderate it.'}
           </p>
-          <Button onClick={onContinue}>Continue with Google</Button>
         </div>
+        {/* Signing in updates the session, which re-renders this page as the form. */}
+        <AccountForm initialMode="register" returnTo="/rooms/new" />
       </main>
     </div>
   );

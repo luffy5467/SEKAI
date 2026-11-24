@@ -4,7 +4,7 @@ use crate::{
     auth::{
         CurrentUser,
         cookies::{self, OAUTH_STATE_COOKIE, REFRESH_COOKIE},
-        google,
+        google, password,
         tokens::{self, WsTicket},
     },
     cache, db,
@@ -27,6 +27,8 @@ use uuid::Uuid;
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/guest", post(guest_login))
+        .route("/register", post(register))
+        .route("/login", post(password_login))
         .route("/session", get(current_session).patch(update_profile))
         .route("/refresh", post(refresh))
         .route("/logout", post(logout))
@@ -85,6 +87,168 @@ async fn guest_login(
 
     let user = db::users::create_guest(&state.db, &display_name).await?;
     issue_session(&state, jar, &user).await
+}
+
+// ---------------------------------------------------------------------------
+// Email + password (SEKAI)
+// ---------------------------------------------------------------------------
+
+/// Argon2 cost makes very long inputs a cheap DoS lever, so cap them.
+const PASSWORD_MIN_CHARS: usize = 10;
+const PASSWORD_MAX_CHARS: usize = 128;
+const EMAIL_MAX_CHARS: usize = 254;
+
+/// One message for every sign-in failure, so the response never reveals
+/// whether an address has an account.
+const BAD_CREDENTIALS: &str = "Email or password is incorrect.";
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RegisterRequest {
+    email: String,
+    password: String,
+    display_name: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PasswordLoginRequest {
+    email: String,
+    password: String,
+}
+
+/// Trim and lower-case; then a deliberately modest shape check. Real
+/// validation of an address is delivering mail to it.
+pub(crate) fn normalize_email(raw: &str) -> Result<String, AppError> {
+    let email = raw.trim().to_lowercase();
+    let invalid = || AppError::field("email", "Enter a valid email address.");
+
+    if email.is_empty() || email.chars().count() > EMAIL_MAX_CHARS {
+        return Err(invalid());
+    }
+    if email.chars().any(|c| c.is_whitespace() || c.is_control()) {
+        return Err(invalid());
+    }
+    let (local, domain) = email.split_once('@').ok_or_else(invalid)?;
+    if local.is_empty() || domain.contains('@') {
+        return Err(invalid());
+    }
+    let labels: Vec<&str> = domain.split('.').collect();
+    if labels.len() < 2 || labels.iter().any(|label| label.is_empty()) {
+        return Err(invalid());
+    }
+    Ok(email)
+}
+
+pub(crate) fn validate_password(password: &str) -> Result<(), AppError> {
+    let length = password.chars().count();
+    if length < PASSWORD_MIN_CHARS {
+        return Err(AppError::field(
+            "password",
+            "Use at least 10 characters.",
+        ));
+    }
+    if length > PASSWORD_MAX_CHARS {
+        return Err(AppError::field("password", "Use at most 128 characters."));
+    }
+    Ok(())
+}
+
+/// Argon2 is deliberately slow; keep it off the async executor.
+async fn hash_blocking(raw: String) -> AppResult<String> {
+    tokio::task::spawn_blocking(move || password::hash_password(&raw))
+        .await
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("hash task failed: {e}")))?
+        .map_err(AppError::Internal)
+}
+
+async fn verify_blocking(raw: String, hash: String) -> AppResult<bool> {
+    tokio::task::spawn_blocking(move || password::verify_password(&raw, &hash))
+        .await
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("verify task failed: {e}")))
+}
+
+/// A real Argon2 hash of a random value, verified against when the address
+/// has no account, so a miss costs the same time as a wrong password.
+fn decoy_hash() -> &'static str {
+    static DECOY: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    DECOY.get_or_init(|| {
+        password::hash_password(&Uuid::new_v4().to_string()).unwrap_or_default()
+    })
+}
+
+async fn limit(state: &AppState, scope: &str, subject: &str, max: u32, window_secs: u64) -> AppResult<()> {
+    let mut redis = state.redis.clone();
+    let decision = ratelimit::check(
+        &mut redis,
+        scope,
+        subject,
+        max,
+        std::time::Duration::from_secs(window_secs),
+    )
+    .await;
+    if decision.allowed {
+        Ok(())
+    } else {
+        Err(AppError::RateLimited {
+            retry_after_ms: decision.retry_after_ms,
+        })
+    }
+}
+
+async fn register(
+    State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    jar: CookieJar,
+    Json(body): Json<RegisterRequest>,
+) -> AppResult<Response> {
+    limit(&state, "register", &peer.ip().to_string(), 10, 3600).await?;
+
+    let email = normalize_email(&body.email)?;
+    validate_password(&body.password)?;
+    let display_name = util::normalize_display_name(&body.display_name);
+    validate_display_name(&display_name)?;
+
+    let hash = hash_blocking(body.password).await?;
+    let user = db::users::create_email_user(&state.db, &email, &display_name, &hash)
+        .await?
+        .ok_or_else(|| {
+            AppError::Conflict("An account with that email already exists. Try signing in.".into())
+        })?;
+
+    tracing::info!(user_id = %user.id, "email account created");
+    issue_session(&state, jar, &user).await
+}
+
+async fn password_login(
+    State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    jar: CookieJar,
+    Json(body): Json<PasswordLoginRequest>,
+) -> AppResult<Response> {
+    limit(&state, "login_ip", &peer.ip().to_string(), 30, 900).await?;
+
+    // A malformed address cannot have an account; answer exactly as for a miss.
+    let Ok(email) = normalize_email(&body.email) else {
+        return Err(AppError::BadRequest(BAD_CREDENTIALS.into()));
+    };
+    if body.password.chars().count() > PASSWORD_MAX_CHARS {
+        return Err(AppError::BadRequest(BAD_CREDENTIALS.into()));
+    }
+    // Per-account limit slows targeted guessing from many IPs.
+    limit(&state, "login_email", &email, 10, 900).await?;
+
+    let found = db::users::find_email_credentials(&state.db, &email).await?;
+    let (user, hash) = match found {
+        Some((user, hash)) => (Some(user), hash),
+        None => (None, decoy_hash().to_string()),
+    };
+
+    let matches = verify_blocking(body.password, hash).await?;
+    match user {
+        Some(user) if matches => issue_session(&state, jar, &user).await,
+        _ => Err(AppError::BadRequest(BAD_CREDENTIALS.into())),
+    }
 }
 
 fn validate_display_name(name: &str) -> Result<(), AppError> {
@@ -465,5 +629,36 @@ mod tests {
         assert!(validate_display_name("日本語名").is_ok());
         assert!(validate_display_name("日本").is_ok());
         assert!(validate_display_name(&"あ".repeat(33)).is_err());
+    }
+}
+
+#[cfg(test)]
+mod email_account_tests {
+    use super::{normalize_email, validate_password};
+
+    #[test]
+    fn normalises_valid_addresses() {
+        assert_eq!(normalize_email("  Luffy@Example.COM ").unwrap(), "luffy@example.com");
+        assert_eq!(normalize_email("a.b+tag@sub.example.jp").unwrap(), "a.b+tag@sub.example.jp");
+    }
+
+    #[test]
+    fn rejects_malformed_addresses() {
+        for bad in [
+            "", "plain", "@example.com", "a@", "a@b", "a@@b.com", "a@b..com",
+            "a b@example.com", "a@example.com.", "a\u{0}@example.com",
+        ] {
+            assert!(normalize_email(bad).is_err(), "accepted {bad:?}");
+        }
+        let long = format!("{}@example.com", "a".repeat(250));
+        assert!(normalize_email(&long).is_err());
+    }
+
+    #[test]
+    fn enforces_password_length() {
+        assert!(validate_password("short").is_err());
+        assert!(validate_password("exactly10!").is_ok());
+        assert!(validate_password(&"x".repeat(128)).is_ok());
+        assert!(validate_password(&"x".repeat(129)).is_err());
     }
 }

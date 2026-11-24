@@ -90,6 +90,61 @@ pub async fn create_guest(pool: &PgPool, display_name: &str) -> sqlx::Result<Use
     .await
 }
 
+/// Create an email + password account. `email` must already be normalised
+/// (trimmed, lower-cased) and `password_hash` must be an Argon2id PHC string.
+///
+/// Returns `Ok(None)` when the address is already taken by any account kind.
+pub async fn create_email_user(
+    pool: &PgPool,
+    email: &str,
+    display_name: &str,
+    password_hash: &str,
+) -> sqlx::Result<Option<User>> {
+    let result = sqlx::query_as::<_, User>(sqlx::AssertSqlSafe(format!(
+        "INSERT INTO users (id, kind, email, display_name, password_hash)
+         VALUES ($1, 'email', $2, $3, $4)
+         RETURNING {USER_COLUMNS}"
+    )))
+    .bind(Uuid::now_v7())
+    .bind(email)
+    .bind(display_name)
+    .bind(password_hash)
+    .fetch_one(pool)
+    .await;
+
+    match result {
+        Ok(user) => Ok(Some(user)),
+        Err(sqlx::Error::Database(error)) if error.is_unique_violation() => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
+/// Look up an email account and its password hash for sign-in.
+///
+/// Only `kind = 'email'` rows are returned, so a Google account sharing the
+/// address can never be signed into with a password.
+pub async fn find_email_credentials(
+    pool: &PgPool,
+    email: &str,
+) -> sqlx::Result<Option<(User, String)>> {
+    #[derive(FromRow)]
+    struct Row {
+        #[sqlx(flatten)]
+        user: User,
+        password_hash: String,
+    }
+
+    let row = sqlx::query_as::<_, Row>(sqlx::AssertSqlSafe(format!(
+        "SELECT {USER_COLUMNS}, password_hash FROM users
+         WHERE kind = 'email' AND lower(email) = lower($1)"
+    )))
+    .bind(email)
+    .fetch_optional(pool)
+    .await?;
+
+    Ok(row.map(|row| (row.user, row.password_hash)))
+}
+
 /// Create or update the local record for a Google identity.
 ///
 /// Keyed on `google_sub`, never on email — Google reassigns addresses within

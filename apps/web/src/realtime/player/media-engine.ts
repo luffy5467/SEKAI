@@ -1,21 +1,14 @@
 import type { MediaSource } from '@playercn/protocol';
-import { api, apiUrl, getAccessToken } from '~/lib/api';
+import { apiUrl, getAccessToken } from '~/lib/api';
+import { getClientConfig } from '~/lib/client-config';
 import { type EngineEvents, type PlayerEngine, usableDuration } from './engine';
 
 /** Where the server's stream relay lives. */
 const RELAY_PREFIX = apiUrl('/api/stream/');
 
-/**
- * Whether the server offers the relay (`streamRelay` in `/api/config`).
- * Fetched once per page; any failure counts as "no relay", so a refused
- * stream ends in a clear error instead of retrying against a 403 forever.
- */
-let relayAvailable: Promise<boolean> | null = null;
+/** Whether the server offers the relay (`streamRelay` in `/api/config`). */
 function isRelayAvailable(): Promise<boolean> {
-  relayAvailable ??= api<{ streamRelay?: boolean }>('/api/config')
-    .then((config) => config.streamRelay === true)
-    .catch(() => false);
-  return relayAvailable;
+  return getClientConfig().then((config) => config.streamRelay);
 }
 
 /** Point a manifest URL at the relay. */

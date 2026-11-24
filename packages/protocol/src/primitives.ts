@@ -59,7 +59,7 @@ export type RoomCategory = z.infer<typeof roomCategory>;
  * makes every snapshot containing a system message fail validation, and the
  * client discards unparseable frames silently.
  */
-export const accountKind = z.enum(['google', 'guest', 'system']);
+export const accountKind = z.enum(['google', 'guest', 'email', 'system']);
 export type AccountKind = z.infer<typeof accountKind>;
 
 export const permissions = z.object({
