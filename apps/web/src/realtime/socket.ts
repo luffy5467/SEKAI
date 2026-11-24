@@ -1,5 +1,6 @@
 import { type ClientMessage, type ServerMessage, serverMessageSchema } from '@playercn/protocol';
 import { api } from '~/lib/api';
+import type { RoomCipher } from '~/lib/room-crypto';
 import { backoffDelay } from '~/lib/utils';
 import { ClockEstimator, monotonicNow, startProbing } from './clock';
 
@@ -37,9 +38,23 @@ export class RoomSocket {
   #intentionallyClosed = false;
   /** Queued while the socket is down, flushed on `ready`. */
   #outbox: ClientMessage[] = [];
+  /**
+   * End-to-end encrypted rooms: decrypts what arrives and seals what leaves.
+   * Both directions run through promise chains so order is preserved even
+   * though WebCrypto is asynchronous.
+   */
+  #cipher: RoomCipher | null = null;
+  #onRefused: ((reason: string) => void) | null = null;
+  #incoming: Promise<void> = Promise.resolve();
+  #outgoing: Promise<void> = Promise.resolve();
 
-  constructor(roomId: string) {
+  constructor(
+    roomId: string,
+    options: { cipher?: RoomCipher | null; onRefused?: (reason: string) => void } = {},
+  ) {
     this.#roomId = roomId;
+    this.#cipher = options.cipher ?? null;
+    this.#onRefused = options.onRefused ?? null;
   }
 
   get state(): ConnectionState {
@@ -153,6 +168,18 @@ export class RoomSocket {
       this.#flushOutbox();
     }
 
+    const cipher = this.#cipher;
+    if (!cipher) {
+      this.#dispatch(message);
+      return;
+    }
+    this.#incoming = this.#incoming
+      .then(() => cipher.decryptIncoming(message))
+      .then((plain) => this.#dispatch(plain))
+      .catch((error: unknown) => console.warn('[socket] could not decrypt a message', error));
+  }
+
+  #dispatch(message: ServerMessage): void {
     for (const listener of this.#listeners) listener(message);
   }
 
@@ -182,6 +209,27 @@ export class RoomSocket {
   }
 
   send(message: ClientMessage): void {
+    const cipher = this.#cipher;
+    if (
+      cipher &&
+      (message.t === 'chat_send' || message.t === 'queue_add' || message.t === 'queue_import')
+    ) {
+      // Never send these readable in an encrypted room: seal first, in order.
+      this.#outgoing = this.#outgoing
+        .then(() => cipher.encryptOutgoing(message, (reason) => this.#onRefused?.(reason)))
+        .then((sealed) => {
+          if (sealed) this.#sendNow(sealed);
+        })
+        .catch((error: unknown) => {
+          console.warn('[socket] could not encrypt a message', error);
+          this.#onRefused?.('Could not encrypt that. Please try again.');
+        });
+      return;
+    }
+    this.#sendNow(message);
+  }
+
+  #sendNow(message: ClientMessage): void {
     if (this.#ws?.readyState === WebSocket.OPEN) {
       this.#ws.send(JSON.stringify(message));
       return;
@@ -199,7 +247,8 @@ export class RoomSocket {
   #flushOutbox(): void {
     const pending = this.#outbox;
     this.#outbox = [];
-    for (const message of pending) this.send(message);
+    // Already sealed where needed (sealing happens before queueing).
+    for (const message of pending) this.#sendNow(message);
   }
 
   close(): void {

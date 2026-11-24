@@ -7,6 +7,7 @@
  * failing test rather than a runtime surprise (ADR 0011).
  */
 
+export * from './classify.ts';
 export * from './client-messages.ts';
 export { clientMessage as clientMessageSchema } from './client-messages.ts';
 export * from './e2ee.ts';
