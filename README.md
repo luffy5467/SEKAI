@@ -1,3 +1,13 @@
+> [!IMPORTANT]
+> **This repository is SEKAI (世界)** — *One world. One screen. Together.* — built
+> on [playercn](https://github.com/ttherealdev/playercn) by ttherealdev (see
+> [NOTICE.md](NOTICE.md)). The adoption audit and progress live in
+> [docs/SEKAI_UPSTREAM_AUDIT.md](docs/SEKAI_UPSTREAM_AUDIT.md). The text below is
+> the upstream README and is being updated as SEKAI takes shape. Notable
+> differences already: the web app uses **TanStack Start** (not Next.js), accounts
+> support **email + password**, the stream relay is **off by default**, and
+> `pnpm test:e2e` runs a Playwright suite.
+
 <div align="center">
 
 # playercn

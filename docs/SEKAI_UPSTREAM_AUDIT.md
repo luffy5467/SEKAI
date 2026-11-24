@@ -185,3 +185,24 @@ GET  /api/rooms                            → 200
 GET  /metrics (no auth)                    → 200  (see S1)
 cargo clippy                               → NOT RUN (component not installed)
 ```
+
+---
+
+## 10. Progress since the audit (branch `sekai/foundation`)
+
+| Item | Status | Commit |
+|---|---|---|
+| D1 `pnpm dev` 500 | ✅ fixed: Vite `resolve.alias` for `~` | `48e1dc6` |
+| D2 web typecheck | ✅ fixed | `48e1dc6` |
+| D3 lint | ✅ clean (justified suppressions for reduced-motion `!important`) | `48e1dc6` |
+| D4 no room creation without Google | ✅ **email + password accounts** (Argon2id, enumeration-safe login, per-IP/per-account limits) | `cace1c0` |
+| S1 `/metrics` public | ✅ `METRICS_TOKEN` bearer guard; 404 in production without a token | `6b31f9a` |
+| S2 stream relay | ✅ **off by default** (`STREAM_RELAY_ENABLED`); player shows a clear error instead of relaying | `6b31f9a` |
+| S4 no CI | ✅ GitHub Actions: lint, typecheck, protocol, build, clippy, cargo test, Playwright | this commit |
+| No integration or browser tests | ✅ Playwright: register → create room → queue → guest joins → play/pause/seek sync (< 0.4 s) → late join; guest cannot control playback. 6/6 passing over 3 repeats | `14826d0` |
+| Roles host/cohost/member/guest | ✅ shown as Host / Moderator / Viewer | `bc4b7a7` |
+| Licence | ⚠️ `NOTICE.md` added; upstream `LICENSE` still to be confirmed | this commit |
+
+**Current verification:** 220 Rust tests, clippy `-D warnings` clean, 16 protocol tests, typecheck clean, Biome clean, production build OK, e2e 2/2.
+
+**Still open:** voice client (WebRTC controller), email verification and password reset (need an email provider such as SES), SEKAI branding, the protocol contract test, compile-time SQL checks, missing ADR documents.
