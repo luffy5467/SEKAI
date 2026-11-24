@@ -97,8 +97,45 @@ async fn ready(State(state): State<AppState>) -> Response {
     (status, Json(body)).into_response()
 }
 
-/// Prometheus exposition. Kept off the public router by the reverse proxy.
-pub async fn metrics(State(state): State<AppState>) -> Response {
+/// Whether a request may read `/metrics`.
+///
+/// With `METRICS_TOKEN` set, the caller must present it as a bearer token
+/// (compared in constant time). Without it, metrics are open in development
+/// and hidden in production — the reverse proxy is no longer the only wall.
+pub(crate) fn metrics_authorized(
+    expected: Option<&str>,
+    is_production: bool,
+    authorization: Option<&str>,
+) -> bool {
+    match expected {
+        Some(token) => authorization
+            .and_then(|value| value.strip_prefix("Bearer "))
+            .is_some_and(|given| constant_time_eq(given.as_bytes(), token.as_bytes())),
+        None => !is_production,
+    }
+}
+
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
+/// Prometheus exposition. Guarded by [`metrics_authorized`]; production
+/// proxies additionally keep it off the public router.
+pub async fn metrics(State(state): State<AppState>, headers: axum::http::HeaderMap) -> Response {
+    let authorization = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok());
+    if !metrics_authorized(
+        state.config.metrics_token.as_deref(),
+        state.config.environment.is_production(),
+        authorization,
+    ) {
+        return axum::http::StatusCode::NOT_FOUND.into_response();
+    }
+
     // Refresh gauges that are derived rather than incrementally maintained.
     state
         .metrics
@@ -157,4 +194,30 @@ pub async fn shutdown_signal(hub: Arc<crate::realtime::hub::Hub>) {
 
     hub.drain().await;
     tracing::info!("drain complete; shutting down");
+}
+
+#[cfg(test)]
+mod metrics_auth_tests {
+    use super::metrics_authorized;
+
+    #[test]
+    fn open_in_development_without_token() {
+        assert!(metrics_authorized(None, false, None));
+    }
+
+    #[test]
+    fn hidden_in_production_without_token() {
+        assert!(!metrics_authorized(None, true, None));
+        assert!(!metrics_authorized(None, true, Some("Bearer anything")));
+    }
+
+    #[test]
+    fn token_must_match_exactly() {
+        let token = Some("s3cret-token");
+        assert!(metrics_authorized(token, true, Some("Bearer s3cret-token")));
+        assert!(!metrics_authorized(token, true, Some("Bearer s3cret-tokeN")));
+        assert!(!metrics_authorized(token, true, Some("Bearer s3cret")));
+        assert!(!metrics_authorized(token, true, Some("s3cret-token")));
+        assert!(!metrics_authorized(token, false, None));
+    }
 }

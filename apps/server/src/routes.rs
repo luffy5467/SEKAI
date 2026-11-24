@@ -317,6 +317,7 @@ async fn client_config(State(state): State<AppState>) -> Json<serde_json::Value>
         "googleSignIn": state.config.google.is_some(),
         "videoSearch": youtube.is_configured(),
         "voiceMaxPeers": state.config.voice.mesh_max_peers,
+        "streamRelay": state.config.stream_relay_enabled,
         "maxRoomParticipants": 100,
         "reactions": crate::realtime::session::ALLOWED_REACTIONS,
     }))
@@ -430,6 +431,12 @@ async fn relay_segment(
 /// refresh every few seconds plus a segment each, and anything an order of
 /// magnitude above that is not someone watching television.
 async fn relay_allowed(state: &AppState, claims: &crate::auth::tokens::AccessClaims) -> Result<(), AppError> {
+    if !state.config.stream_relay_enabled {
+        return Err(AppError::Forbidden(
+            "This server does not relay streams. Use a link that allows browser playback.",
+        ));
+    }
+
     let mut redis = state.redis.clone();
     let decision =
         crate::ratelimit::check_per_minute(&mut redis, "relay", &claims.sub.to_string(), 600).await;

@@ -59,6 +59,17 @@ pub struct Config {
     /// these headers lets any client forge an identity.
     pub trust_proxy_headers: bool,
 
+    /// Serve the HLS relay (`/api/stream/*`). Off by default: it re-serves
+    /// third-party streams whose CORS policy refuses other sites, which costs
+    /// egress and can conflict with the stream owner's terms. Opt in with
+    /// `STREAM_RELAY_ENABLED=true` only for sources you are authorised to relay.
+    pub stream_relay_enabled: bool,
+
+    /// Bearer token required to scrape `/metrics`. When unset, metrics are open
+    /// in development and return 404 in production, so a deployment without a
+    /// filtering proxy (e.g. a plain load balancer) never leaks them.
+    pub metrics_token: Option<String>,
+
     pub database: DatabaseConfig,
     pub redis: RedisConfig,
     pub auth: AuthConfig,
@@ -200,6 +211,8 @@ impl Config {
             public_url,
             web_origin,
             trust_proxy_headers: parse_opt("TRUST_PROXY_HEADERS")?.unwrap_or(false),
+            stream_relay_enabled: parse_opt("STREAM_RELAY_ENABLED")?.unwrap_or(false),
+            metrics_token: optional("METRICS_TOKEN"),
 
             database: DatabaseConfig {
                 url: required("DATABASE_URL")?,
@@ -496,6 +509,8 @@ mod tests {
             public_url: "http://localhost:8080".into(),
             web_origin: "http://localhost:3000".into(),
             trust_proxy_headers: false,
+            stream_relay_enabled: false,
+            metrics_token: None,
             database: DatabaseConfig {
                 url: "postgres://localhost/x".into(),
                 max_connections: 10,

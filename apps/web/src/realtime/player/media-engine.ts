@@ -1,9 +1,22 @@
 import type { MediaSource } from '@playercn/protocol';
-import { apiUrl, getAccessToken } from '~/lib/api';
+import { api, apiUrl, getAccessToken } from '~/lib/api';
 import { type EngineEvents, type PlayerEngine, usableDuration } from './engine';
 
 /** Where the server's stream relay lives. */
 const RELAY_PREFIX = apiUrl('/api/stream/');
+
+/**
+ * Whether the server offers the relay (`streamRelay` in `/api/config`).
+ * Fetched once per page; any failure counts as "no relay", so a refused
+ * stream ends in a clear error instead of retrying against a 403 forever.
+ */
+let relayAvailable: Promise<boolean> | null = null;
+function isRelayAvailable(): Promise<boolean> {
+  relayAvailable ??= api<{ streamRelay?: boolean }>('/api/config')
+    .then((config) => config.streamRelay === true)
+    .catch(() => false);
+  return relayAvailable;
+}
 
 /** Point a manifest URL at the relay. */
 function relayUrl(url: string): string {
@@ -171,7 +184,16 @@ export class MediaEngine implements PlayerEngine {
         if (!relayed) {
           hls.destroy();
           this.#streaming = null;
-          this.#startHls(Hls, url, true);
+          void isRelayAvailable().then((available) => {
+            if (this.#destroyed || this.#streaming !== null) return; // destroyed or replaced meanwhile
+            if (available) {
+              this.#startHls(Hls, url, true);
+            } else {
+              this.#events.onError?.(
+                'This stream could not be loaded. It may block playback from other sites — use a link that allows browser playback.',
+              );
+            }
+          });
           return;
         }
         // Already relayed, so this is the network genuinely failing. Public
