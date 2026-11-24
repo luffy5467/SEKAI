@@ -17,12 +17,9 @@ const prerender = process.env.PRERENDER === '1';
 // so Nitro is only added when a target platform is named.
 const nitroTarget = Boolean(process.env.VERCEL || process.env.NITRO_PRESET);
 
-// Where the SEKAI API runs in production (e.g. https://sekai-api.up.railway.app).
-// The web host forwards /api/** there so the API is same-site with the page:
-// the refresh cookie is SameSite=Lax and would not be sent to another site.
-// The WebSocket connects directly (PUBLIC_WS_URL); it authenticates with a
-// one-time ticket, not a cookie.
-const apiOrigin = process.env.SEKAI_API_ORIGIN?.replace(/\/+$/, '');
+// `/api/**` is proxied to the API at runtime by src/routes/api.$.ts (see
+// src/server/api-proxy.ts), not by a build-time route rule, so the proxy
+// secret is read from the environment per request and never bundled.
 
 export default defineConfig({
   plugins: [
@@ -34,9 +31,7 @@ export default defineConfig({
       },
       pages: prerender ? [{ path: '/' }] : [],
     }),
-    ...(nitroTarget
-      ? [nitro(apiOrigin ? { routeRules: { '/api/**': { proxy: `${apiOrigin}/api/**` } } } : {})]
-      : []),
+    ...(nitroTarget ? [nitro()] : []),
     viteReact(),
   ],
 

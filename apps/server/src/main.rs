@@ -6,6 +6,7 @@
 mod auth;
 mod cache;
 mod config;
+mod client_ip;
 mod db;
 mod e2ee;
 mod error;
@@ -74,6 +75,18 @@ async fn main() -> anyhow::Result<()> {
         .build()
         .context("could not build HTTP client")?;
 
+    if config.environment.is_production() && !config.require_proxy_auth {
+        tracing::warn!(
+            "REQUIRE_PROXY_AUTH=false in production — /api is served to direct callers; only safe \
+             if the API is reachable solely through a trusted reverse proxy"
+        );
+    }
+    if std::env::var_os("TRUST_PROXY_HEADERS").is_some() {
+        tracing::warn!(
+            "TRUST_PROXY_HEADERS is no longer used: forwarded headers are never trusted on their \
+             own. See SEKAI_PROXY_SECRET and EDGE_CLIENT_IP_HEADER"
+        );
+    }
     if config.google.is_none() {
         tracing::warn!("GOOGLE_CLIENT_ID/SECRET unset — Google sign-in is off (email and guest sign-in work)");
     }

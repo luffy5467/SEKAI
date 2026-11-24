@@ -111,7 +111,7 @@ Realtime client: `realtime/clock.ts` (Cristian's algorithm, median of filtered s
 |---|---|---|
 | S1 | Medium | **`GET /metrics` is unauthenticated** (returned 200 with no credentials). It exposes operational data to anyone who can reach the API. Restrict it to an internal network, the proxy or a bearer token. |
 | S2 | Medium / **policy** | **The HLS relay (`/api/stream/manifest`, `/segment`) re-serves third-party streams whose CORS policy blocks other origins** (the code comments cite Pluto TV). Any signed-in user, **including an anonymous guest**, may use it, at up to 600 requests per minute. This costs bandwidth and re-publishes content its owner restricted, which conflicts with SEKAI's "authorised media only" rule. It needs a product decision (see §8). |
-| S3 | Low | `TRUST_PROXY_HEADERS` must be `true` behind a proxy, or rate limits collapse to a single bucket. This is documented, but easy to get wrong in AWS. |
+| S3 | Low | `TRUST_PROXY_HEADERS` must be `true` behind a proxy, or rate limits collapse to a single bucket. This is documented, but easy to get wrong in AWS. *Superseded: forwarded headers are no longer trusted at all; proxy authentication (`SEKAI_PROXY_SECRET`) replaces this setting. See docs/DEPLOY_RAILWAY.md.* |
 | S4 | Low | No `pnpm audit` / `cargo audit` in a pipeline; there is no CI at all (`.github/` absent). |
 
 Not reviewed in depth yet (Phase 7): CSP headers at runtime, cookie flags in production mode, WS message-size limits, audit-log coverage.

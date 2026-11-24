@@ -15,6 +15,7 @@ use crate::{
 };
 use axum::{
     Json, Router,
+    http::HeaderMap,
     extract::{ConnectInfo, Query, State},
     response::{IntoResponse, Redirect, Response},
     routing::{get, post},
@@ -62,6 +63,7 @@ struct GuestLoginRequest {
 async fn guest_login(
     State(state): State<AppState>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
     jar: CookieJar,
     Json(body): Json<GuestLoginRequest>,
 ) -> AppResult<Response> {
@@ -70,7 +72,7 @@ async fn guest_login(
     let decision = ratelimit::check(
         &mut redis,
         "guest_signup",
-        &peer.ip().to_string(),
+        &caller(&state, &headers, peer),
         state.config.limits.guest_signups_per_hour,
         std::time::Duration::from_secs(3600),
     )
@@ -177,6 +179,13 @@ fn decoy_hash() -> &'static str {
     })
 }
 
+/// The rate-limit subject for an unauthenticated request: the same resolver
+/// as the general throttle (`client_ip::resolve`), never the raw TCP peer or
+/// a forwarded header on its own.
+fn caller(state: &AppState, headers: &HeaderMap, peer: SocketAddr) -> String {
+    crate::client_ip::resolve(headers, peer.ip(), &state.config.client_ip).bucket()
+}
+
 async fn limit(state: &AppState, scope: &str, subject: &str, max: u32, window_secs: u64) -> AppResult<()> {
     let mut redis = state.redis.clone();
     let decision = ratelimit::check(
@@ -199,11 +208,12 @@ async fn limit(state: &AppState, scope: &str, subject: &str, max: u32, window_se
 async fn register(
     State(state): State<AppState>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
     jar: CookieJar,
     Json(body): Json<RegisterRequest>,
 ) -> AppResult<Response> {
     let per_hour = state.config.limits.registrations_per_hour;
-    limit(&state, "register", &peer.ip().to_string(), per_hour, 3600).await?;
+    limit(&state, "register", &caller(&state, &headers, peer), per_hour, 3600).await?;
 
     let email = normalize_email(&body.email)?;
     validate_password(&body.password)?;
@@ -224,10 +234,11 @@ async fn register(
 async fn password_login(
     State(state): State<AppState>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
     jar: CookieJar,
     Json(body): Json<PasswordLoginRequest>,
 ) -> AppResult<Response> {
-    limit(&state, "login_ip", &peer.ip().to_string(), 30, 900).await?;
+    limit(&state, "login_ip", &caller(&state, &headers, peer), 30, 900).await?;
 
     // A malformed address cannot have an account; answer exactly as for a miss.
     let Ok(email) = normalize_email(&body.email) else {

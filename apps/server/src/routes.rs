@@ -50,6 +50,11 @@ pub fn build(state: AppState) -> Router {
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             throttle_by_ip,
+        ))
+        // Added last, so it runs first: see `require_proxy_auth`.
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            require_proxy_auth,
         ));
 
     let router = Router::new()
@@ -61,113 +66,25 @@ pub fn build(state: AppState) -> Router {
     apply_layers(router, &state)
 }
 
-/// The caller's real IP address.
-///
-/// Behind a reverse proxy the TCP peer is the *proxy*, so rate limiting on it
-/// puts every user in the world into one shared bucket — the whole site starts
-/// returning 429 under trivial load. Deployments therefore have to read the
-/// forwarded headers instead.
-///
-/// This is gated on `TRUST_PROXY_HEADERS` and defaults to **off**, because a
-/// directly-reachable origin that believes `X-Forwarded-For` lets any client
-/// forge an identity and bypass every per-IP limit. Turn it on only when the
-/// origin cannot be reached except through your proxy.
-pub fn client_ip(
-    headers: &axum::http::HeaderMap,
-    peer: std::net::SocketAddr,
-    trust_proxy: bool,
-) -> String {
-    if !trust_proxy {
-        return peer.ip().to_string();
-    }
-
-    // Cloudflare sets this and strips any client-supplied copy, so it is the
-    // most trustworthy value when it is present.
-    if let Some(value) = headers.get("cf-connecting-ip").and_then(|v| v.to_str().ok()) {
-        let candidate = value.trim();
-        if !candidate.is_empty() {
-            return candidate.to_owned();
-        }
-    }
-
-    // Otherwise the leftmost entry of X-Forwarded-For is the original client;
-    // everything after it is the proxy chain that handled the request.
-    if let Some(forwarded) = headers.get("x-forwarded-for").and_then(|v| v.to_str().ok())
-        && let Some(first) = forwarded.split(',').next()
+/// Gate for `/api/**`: with proxy authentication required, a request must
+/// carry the SEKAI web proxy's secret or it is refused with 403 — never served
+/// on an unauthenticated path. Runs *before* the IP throttle, so rejected
+/// direct calls do not drain the shared direct-caller bucket that WebSocket
+/// upgrades also use. `/ws/**`, `/health/**` and `/metrics` are not gated.
+async fn require_proxy_auth(
+    State(state): State<AppState>,
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Result<axum::response::Response, AppError> {
+    let path = request.uri().path();
+    let is_api = path == "/api" || path.starts_with("/api/");
+    if is_api
+        && state.config.require_proxy_auth
+        && !crate::client_ip::proxy_authenticated(request.headers(), &state.config.client_ip)
     {
-        let candidate = first.trim();
-        if !candidate.is_empty() {
-            return candidate.to_owned();
-        }
+        return Err(AppError::Forbidden("Direct API access is not allowed."));
     }
-
-    peer.ip().to_string()
-}
-
-#[cfg(test)]
-mod client_ip_tests {
-    use super::client_ip;
-    use axum::http::{HeaderMap, HeaderValue};
-
-    fn peer() -> std::net::SocketAddr {
-        "10.0.0.7:54321".parse().expect("valid addr")
-    }
-
-    #[test]
-    fn untrusted_deployments_ignore_forwarded_headers() {
-        // Without a proxy in front, believing these would let any client claim
-        // a fresh identity and bypass every per-IP limit.
-        let mut headers = HeaderMap::new();
-        headers.insert("x-forwarded-for", HeaderValue::from_static("1.2.3.4"));
-        headers.insert("cf-connecting-ip", HeaderValue::from_static("5.6.7.8"));
-
-        assert_eq!(client_ip(&headers, peer(), false), "10.0.0.7");
-    }
-
-    #[test]
-    fn cloudflare_header_wins_when_trusted() {
-        let mut headers = HeaderMap::new();
-        headers.insert("cf-connecting-ip", HeaderValue::from_static("203.0.113.9"));
-        headers.insert(
-            "x-forwarded-for",
-            HeaderValue::from_static("203.0.113.9, 172.70.1.1"),
-        );
-
-        assert_eq!(client_ip(&headers, peer(), true), "203.0.113.9");
-    }
-
-    #[test]
-    fn falls_back_to_the_leftmost_forwarded_entry() {
-        // Everything after the first hop is the proxy chain, not the client.
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            "x-forwarded-for",
-            HeaderValue::from_static("198.51.100.4, 172.70.1.1, 10.0.0.2"),
-        );
-
-        assert_eq!(client_ip(&headers, peer(), true), "198.51.100.4");
-    }
-
-    #[test]
-    fn falls_back_to_the_socket_when_headers_are_absent_or_blank() {
-        assert_eq!(client_ip(&HeaderMap::new(), peer(), true), "10.0.0.7");
-
-        let mut blank = HeaderMap::new();
-        blank.insert("x-forwarded-for", HeaderValue::from_static("   "));
-        assert_eq!(client_ip(&blank, peer(), true), "10.0.0.7");
-    }
-
-    #[test]
-    fn distinct_clients_behind_one_proxy_get_distinct_buckets() {
-        // The property that matters: without this, every user of the site
-        // shares a single rate-limit bucket and the whole thing 429s.
-        let mut a = HeaderMap::new();
-        a.insert("cf-connecting-ip", HeaderValue::from_static("203.0.113.1"));
-        let mut b = HeaderMap::new();
-        b.insert("cf-connecting-ip", HeaderValue::from_static("203.0.113.2"));
-
-        assert_ne!(client_ip(&a, peer(), true), client_ip(&b, peer(), true));
-    }
+    Ok(next.run(request).await)
 }
 
 /// Coarse per-IP ceiling in front of everything.
@@ -182,7 +99,8 @@ async fn throttle_by_ip(
 ) -> Result<axum::response::Response, AppError> {
     state.metrics.http_requests.fetch_add(1, Ordering::Relaxed);
 
-    let subject = client_ip(request.headers(), peer, state.config.trust_proxy_headers);
+    let subject =
+        crate::client_ip::resolve(request.headers(), peer.ip(), &state.config.client_ip).bucket();
 
     let mut redis = state.redis.clone();
     let decision = crate::ratelimit::check_per_minute(

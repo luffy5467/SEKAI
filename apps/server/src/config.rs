@@ -52,12 +52,17 @@ pub struct Config {
     pub bind_addr: String,
     pub public_url: String,
     pub web_origin: String,
-    /// Read the caller's IP from `CF-Connecting-IP` / `X-Forwarded-For`.
-    ///
-    /// Required behind a reverse proxy, or every user shares one rate-limit
-    /// bucket. Dangerous without one: a directly-reachable origin that believes
-    /// these headers lets any client forge an identity.
-    pub trust_proxy_headers: bool,
+    /// How callers are identified for rate limiting (`client_ip` module):
+    /// the shared proxy secret (`SEKAI_PROXY_SECRET`) and an optional,
+    /// verified edge header (`EDGE_CLIENT_IP_HEADER`, off by default).
+    /// Forwarded headers are never trusted on their own.
+    pub client_ip: crate::client_ip::ClientIpPolicy,
+
+    /// Refuse `/api/**` unless it carries the proxy secret. Defaults to true in
+    /// production; the server will not start in that state without a secret.
+    /// Set `REQUIRE_PROXY_AUTH=false` only for a deployment whose API is not
+    /// publicly reachable except through a trusted same-origin reverse proxy.
+    pub require_proxy_auth: bool,
 
     /// Serve the HLS relay (`/api/stream/*`). Off by default: it re-serves
     /// third-party streams whose CORS policy refuses other sites, which costs
@@ -218,7 +223,11 @@ impl Config {
                 .unwrap_or_else(|| "0.0.0.0:8080".into()),
             public_url,
             web_origin,
-            trust_proxy_headers: parse_opt("TRUST_PROXY_HEADERS")?.unwrap_or(false),
+            client_ip: crate::client_ip::ClientIpPolicy::new(
+                proxy_secret()?.as_deref(),
+                edge_client_ip_header()?,
+            ),
+            require_proxy_auth: parse_opt("REQUIRE_PROXY_AUTH")?.unwrap_or(is_prod),
             stream_relay_enabled: parse_opt("STREAM_RELAY_ENABLED")?.unwrap_or(false),
             metrics_token: optional("METRICS_TOKEN"),
 
@@ -312,6 +321,18 @@ impl Config {
     }
 
     fn validate(&self) -> Result<(), ConfigError> {
+        // Missing or empty both land here: `optional` treats blank as unset.
+        // Refusing to start beats silently serving an ungated API.
+        if self.require_proxy_auth && !self.client_ip.has_proxy_secret() {
+            return Err(ConfigError::Invalid {
+                key: "SEKAI_PROXY_SECRET",
+                reason: "is required while REQUIRE_PROXY_AUTH is true (the production default); \
+                         set the same value on the web proxy, or set REQUIRE_PROXY_AUTH=false \
+                         only if the API is reachable solely through a trusted reverse proxy"
+                    .into(),
+            });
+        }
+
         if self.environment.is_production() {
             if !self.auth.cookie_secure {
                 return Err(ConfigError::Invalid {
@@ -319,15 +340,6 @@ impl Config {
                     reason: "must be true in production — session cookies would ride plaintext"
                         .into(),
                 });
-            }
-            if !self.trust_proxy_headers {
-                // Not fatal: someone may genuinely terminate TLS on the
-                // process. But behind a proxy this silently collapses every
-                // per-IP limit into one shared bucket, so it must be loud.
-                tracing::warn!(
-                    "TRUST_PROXY_HEADERS is false in production — if this service sits behind \
-                     a reverse proxy, rate limiting is counting the proxy's IP for every user"
-                );
             }
             if self.web_origin.starts_with("http://") {
                 return Err(ConfigError::Invalid {
@@ -374,6 +386,38 @@ impl Config {
         origins.dedup();
         origins
     }
+}
+
+/// `SEKAI_PROXY_SECRET`, if set. Returned only to build the policy, which
+/// keeps a digest — the raw value is never stored in `Config`.
+fn proxy_secret() -> Result<Option<String>, ConfigError> {
+    match optional("SEKAI_PROXY_SECRET") {
+        Some(secret) if secret.trim().len() < crate::client_ip::MIN_PROXY_SECRET_LEN => {
+            Err(ConfigError::Invalid {
+                key: "SEKAI_PROXY_SECRET",
+                reason: format!(
+                    "must be at least {} characters (use `openssl rand -hex 32`)",
+                    crate::client_ip::MIN_PROXY_SECRET_LEN
+                ),
+            })
+        }
+        other => Ok(other.map(|secret| secret.trim().to_owned())),
+    }
+}
+
+/// `EDGE_CLIENT_IP_HEADER`: off unless set. Enable only for a header the
+/// platform edge has been verified to overwrite on every request.
+fn edge_client_ip_header() -> Result<Option<axum::http::HeaderName>, ConfigError> {
+    optional("EDGE_CLIENT_IP_HEADER")
+        .map(|raw| {
+            axum::http::HeaderName::from_bytes(raw.trim().to_ascii_lowercase().as_bytes()).map_err(
+                |_| ConfigError::Invalid {
+                    key: "EDGE_CLIENT_IP_HEADER",
+                    reason: "is not a valid header name".into(),
+                },
+            )
+        })
+        .transpose()
 }
 
 fn optional(key: &'static str) -> Option<String> {
@@ -518,7 +562,8 @@ mod tests {
             bind_addr: "0.0.0.0:8080".into(),
             public_url: "http://localhost:8080".into(),
             web_origin: "http://localhost:3000".into(),
-            trust_proxy_headers: false,
+            client_ip: crate::client_ip::ClientIpPolicy::default(),
+            require_proxy_auth: false,
             stream_relay_enabled: false,
             metrics_token: None,
             database: DatabaseConfig {
@@ -600,5 +645,29 @@ mod tests {
         cfg.web_origin = "https://example.com".into();
         cfg.auth.cookie_secure = false;
         assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn requiring_proxy_auth_without_a_secret_refuses_to_start() {
+        let mut cfg = base_config();
+        cfg.require_proxy_auth = true;
+        let error = cfg.validate().unwrap_err().to_string();
+        assert!(error.contains("SEKAI_PROXY_SECRET"), "{error}");
+    }
+
+    #[test]
+    fn requiring_proxy_auth_with_a_secret_is_valid() {
+        let mut cfg = base_config();
+        cfg.require_proxy_auth = true;
+        cfg.client_ip =
+            crate::client_ip::ClientIpPolicy::new(Some("0123456789abcdef0123456789abcdef"), None);
+        assert!(cfg.validate().is_ok());
+    }
+
+    #[test]
+    fn development_without_a_secret_is_the_documented_local_mode() {
+        let cfg = base_config();
+        assert!(!cfg.require_proxy_auth);
+        assert!(cfg.validate().is_ok());
     }
 }

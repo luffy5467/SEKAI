@@ -27,6 +27,7 @@ jobs:
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test:protocol
+      - run: pnpm --filter @playercn/web test
       - run: pnpm build
 
   server:
@@ -78,6 +79,10 @@ jobs:
       - run: cp .env.example .env && ./scripts/gen-keys.sh
       - run: pnpm --filter @sekai/e2e exec playwright install --with-deps chromium
       - run: pnpm test:e2e
+        env:
+          CI: 'true'
+      # Web proxy → gated API (REQUIRE_PROXY_AUTH, test-only secret).
+      - run: pnpm test:e2e:proxy
         env:
           CI: 'true'
       - if: failure()
