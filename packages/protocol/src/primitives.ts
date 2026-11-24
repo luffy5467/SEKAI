@@ -17,7 +17,15 @@ export const roomSlug = z
 
 export const displayName = z.string().trim().min(2).max(32);
 
-export const chatBody = z.string().trim().min(1).max(2000);
+/** Longest plaintext message a person may type. */
+export const CHAT_MAX_CHARS = 2000;
+
+/**
+ * A chat body on the wire: plaintext in an ordinary room, or ciphertext
+ * (`e1.…`, see e2ee.ts) in an end-to-end encrypted one — which is why the cap
+ * is above the typing limit. The server enforces the per-room rule.
+ */
+export const chatBody = z.string().trim().min(1).max(12_000);
 
 /** Milliseconds since the Unix epoch, as measured by the server. */
 export const epochMs = z.number().int();
@@ -118,6 +126,11 @@ export const mediaSource = z.object({
   url: z.url(),
   /** Present for, and only for, `youtube`. */
   videoId: videoId.nullable(),
+  /**
+   * End-to-end encrypted rooms only: the real source, sealed with the room key
+   * (see e2ee.ts). `kind`/`url` are then a placeholder the server stores.
+   */
+  sealed: z.string().optional(),
 });
 export type MediaSource = z.infer<typeof mediaSource>;
 

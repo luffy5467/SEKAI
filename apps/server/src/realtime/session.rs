@@ -169,6 +169,10 @@ impl Session {
                 self.handle_queue_add(&url, play_next).await
             }
 
+            ClientMessage::QueueAddSealed { sealed, play_next } => {
+                self.handle_queue_add_sealed(sealed, play_next).await
+            }
+
             ClientMessage::QueueImport { url } => self.handle_queue_import(&url).await,
 
             ClientMessage::ReportDuration { seconds } => {
@@ -548,11 +552,22 @@ impl Session {
 
     // -- Queue --------------------------------------------------------------
 
+    /// Whether this room is end-to-end encrypted. Fixed at creation.
+    async fn is_e2ee(&self) -> bool {
+        self.room.info.read().await.e2ee
+    }
+
     async fn handle_queue_add(&mut self, raw: &str, play_next: bool) -> Result<(), AppError> {
         self.require(
             self.permissions.can_manage_queue,
             "You cannot add to the queue in this room.",
         )?;
+        // A plaintext link in an encrypted room would be stored readable.
+        if self.is_e2ee().await {
+            return Err(AppError::BadRequest(
+                "This room is end-to-end encrypted. Update the page and try again.".into(),
+            ));
+        }
 
         if !self
             .allow("queue", self.state.config.limits.queue_adds_per_minute)
@@ -580,12 +595,62 @@ impl Session {
         self.start_if_idle().await
     }
 
+    /// Store an encrypted source. The server cannot classify or describe it,
+    /// so it keeps a placeholder (`File` at an unresolvable URL) next to the
+    /// ciphertext; duration arrives later from a player via `report_duration`.
+    async fn handle_queue_add_sealed(
+        &mut self,
+        sealed: String,
+        play_next: bool,
+    ) -> Result<(), AppError> {
+        self.require(
+            self.permissions.can_manage_queue,
+            "You cannot add to the queue in this room.",
+        )?;
+        if !self.is_e2ee().await {
+            return Err(AppError::BadRequest("This room is not encrypted.".into()));
+        }
+        if !crate::e2ee::is_sealed(&sealed, crate::e2ee::MAX_SEALED_QUEUE) {
+            return Err(AppError::BadRequest("That encrypted item is malformed.".into()));
+        }
+        if !self
+            .allow("queue", self.state.config.limits.queue_adds_per_minute)
+            .await
+        {
+            return Ok(());
+        }
+
+        let item = db::queue::NewQueueItem {
+            source: crate::media::MediaSource {
+                kind: crate::media::SourceKind::File,
+                url: crate::e2ee::SEALED_SOURCE_URL.to_string(),
+                video_id: None,
+                sealed: Some(sealed),
+            },
+            title: crate::e2ee::PLACEHOLDER_ITEM_TITLE.to_string(),
+            channel_title: String::new(),
+            duration_seconds: 0,
+            thumbnail_url: String::new(),
+            added_by: self.user.id,
+        };
+
+        db::queue::add(&self.state.db, self.room.id, item, play_next).await?;
+        self.broadcast_queue().await?;
+        self.start_if_idle().await
+    }
+
     /// Fetch a playlist URL and append everything on it.
     async fn handle_queue_import(&mut self, raw: &str) -> Result<(), AppError> {
         self.require(
             self.permissions.can_manage_queue,
             "You cannot add to the queue in this room.",
         )?;
+        // Imports are fetched and parsed in plaintext on the server.
+        if self.is_e2ee().await {
+            return Err(AppError::BadRequest(
+                "Playlist import isn't available in end-to-end encrypted rooms.".into(),
+            ));
+        }
 
         // An import is one request that can produce hundreds of rows, so it is
         // metered far more tightly than a single add.
@@ -610,6 +675,7 @@ impl Session {
                     kind: crate::media::SourceKind::Hls,
                     url: fetched.final_url.clone(),
                     video_id: None,
+                    sealed: None,
                 };
                 let item = self.describe(source).await?;
                 db::queue::add(&self.state.db, self.room.id, item, false).await?;
@@ -834,7 +900,16 @@ impl Session {
         if trimmed.is_empty() {
             return Err(AppError::BadRequest("Message is empty.".into()));
         }
-        if trimmed.chars().count() > 2000 {
+        let e2ee = self.is_e2ee().await;
+        if e2ee {
+            // Only ciphertext is accepted: a plaintext message from an
+            // outdated client must fail loudly rather than be stored readable.
+            if !crate::e2ee::is_sealed(trimmed, crate::e2ee::MAX_SEALED_CHAT) {
+                return Err(AppError::BadRequest(
+                    "This room is end-to-end encrypted. Update the page and try again.".into(),
+                ));
+            }
+        } else if trimmed.chars().count() > 2000 {
             return Err(AppError::BadRequest("Message is too long.".into()));
         }
 
@@ -845,7 +920,13 @@ impl Session {
             return Ok(());
         }
 
-        let mentions = db::chat::resolve_mentions(&self.state.db, self.room.id, trimmed).await?;
+        // Mentions are parsed from the text, which the server cannot read in an
+        // encrypted room; clients highlight them after decrypting instead.
+        let mentions = if e2ee {
+            Vec::new()
+        } else {
+            db::chat::resolve_mentions(&self.state.db, self.room.id, trimmed).await?
+        };
 
         let row = db::chat::insert(
             &self.state.db,

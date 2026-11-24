@@ -57,6 +57,13 @@ const queueAdd = z.object({
 });
 
 /** Expand an M3U/PLS playlist URL and append every entry on it. */
+/** Add a source in an end-to-end encrypted room, sealed with the room key. */
+const queueAddSealed = z.object({
+  t: z.literal('queue_add_sealed'),
+  sealed: z.string().min(1).max(16_384),
+  playNext: z.boolean().optional(),
+});
+
 const queueImport = z.object({
   t: z.literal('queue_import'),
   url: z.url().max(2048),
@@ -168,6 +175,7 @@ export const clientMessage = z.discriminatedUnion('t', [
   syncIntent,
   syncReport,
   queueAdd,
+  queueAddSealed,
   queueImport,
   reportDuration,
   playbackReady,

@@ -498,6 +498,16 @@ async fn record_progress(
         return Err(AppError::field("positionSeconds", "Invalid position."));
     }
 
+    // What someone watches in an end-to-end encrypted room must not be
+    // recorded in plaintext history. Clients skip this call; refuse it too.
+    if let Some(room_id) = body.room_id
+        && db::rooms::find_by_id(&state.db, room_id)
+            .await?
+            .is_some_and(|room| room.e2ee)
+    {
+        return Ok(Json(serde_json::json!({ "ok": true, "recorded": false })));
+    }
+
     db::history::record_watch(
         &state.db,
         claims.sub,

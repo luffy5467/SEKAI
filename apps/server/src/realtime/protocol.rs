@@ -53,6 +53,15 @@ pub enum ClientMessage {
         play_next: bool,
     },
 
+    /// Add one source in an end-to-end encrypted room. `sealed` is the source
+    /// (kind, URL, title) encrypted with the room key; the server stores it
+    /// without being able to read it.
+    QueueAddSealed {
+        sealed: String,
+        #[serde(default, rename = "playNext")]
+        play_next: bool,
+    },
+
     /// Expand a playlist URL and append everything on it.
     QueueImport {
         url: String,
@@ -363,6 +372,10 @@ pub struct RoomInfo {
     pub created_at: i64,
     pub max_participants: i32,
     pub settings: RoomSettings,
+    /// End-to-end encrypted room; see `meta_sealed` and `key_check`.
+    pub e2ee: bool,
+    pub meta_sealed: Option<String>,
+    pub key_check: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -590,6 +603,9 @@ mod wire_names {
                 created_at: 0,
                 max_participants: 25,
                 settings: crate::db::rooms::RoomSettings::default(),
+                e2ee: false,
+                meta_sealed: None,
+                key_check: None,
             },
             timeline: Timeline::idle(0),
             participants: Vec::new(),

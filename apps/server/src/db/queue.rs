@@ -29,6 +29,8 @@ pub struct QueueItem {
     pub added_at: DateTime<Utc>,
     pub position: f64,
     pub played_at: Option<DateTime<Utc>>,
+    /// Sealed source for end-to-end encrypted rooms; see `MediaSource::sealed`.
+    pub sealed: Option<String>,
 }
 
 impl QueueItem {
@@ -42,12 +44,14 @@ impl QueueItem {
             kind: SourceKind::parse(&self.source_kind).unwrap_or(SourceKind::File),
             url: self.source_url.clone(),
             video_id: self.video_id.clone(),
+            sealed: self.sealed.clone(),
         }
     }
 }
 
 const COLUMNS: &str = "id, room_id, video_id, source_kind, source_url, title, channel_title, \
-                       duration_seconds, thumbnail_url, added_by, added_at, position, played_at";
+                       duration_seconds, thumbnail_url, added_by, added_at, position, played_at, \
+                       sealed";
 
 #[derive(Debug, Clone)]
 pub struct NewQueueItem {
@@ -167,8 +171,8 @@ async fn insert_one(
     sqlx::query_as::<_, QueueItem>(sqlx::AssertSqlSafe(format!(
         "INSERT INTO queue_items
              (id, room_id, video_id, source_kind, source_url, title, channel_title,
-              duration_seconds, thumbnail_url, added_by, position)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+              duration_seconds, thumbnail_url, added_by, position, sealed)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
          RETURNING {COLUMNS}"
     )))
     .bind(Uuid::now_v7())
@@ -182,6 +186,7 @@ async fn insert_one(
     .bind(&item.thumbnail_url)
     .bind(item.added_by)
     .bind(position)
+    .bind(item.source.sealed.as_deref())
     .fetch_one(&mut **tx)
     .await
 }

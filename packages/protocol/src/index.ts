@@ -9,6 +9,7 @@
 
 export * from './client-messages.ts';
 export { clientMessage as clientMessageSchema } from './client-messages.ts';
+export * from './e2ee.ts';
 export * from './primitives.ts';
 export * from './rest.ts';
 export * from './server-messages.ts';

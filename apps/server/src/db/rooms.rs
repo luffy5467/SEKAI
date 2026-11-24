@@ -31,6 +31,11 @@ pub struct Room {
     pub active_participants: i32,
     pub created_at: DateTime<Utc>,
     pub last_active_at: DateTime<Utc>,
+    /// End-to-end encrypted: `name` is a placeholder and the real name, chat
+    /// and queue are ciphertext only members' browsers can open.
+    pub e2ee: bool,
+    pub meta_sealed: Option<String>,
+    pub key_check: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -85,7 +90,8 @@ impl Default for RoomSettings {
 
 const ROOM_COLUMNS: &str = "id, slug, name, topic, visibility, category, host_id, owner_id, \
                             successor_id, empty_since, password_hash, max_participants, settings, \
-                            active_participants, created_at, last_active_at";
+                            active_participants, created_at, last_active_at, e2ee, meta_sealed, \
+                            key_check";
 
 #[derive(Debug, Clone)]
 pub struct NewRoom<'a> {
@@ -97,6 +103,9 @@ pub struct NewRoom<'a> {
     pub password_hash: Option<&'a str>,
     pub max_participants: i32,
     pub settings: RoomSettings,
+    pub e2ee: bool,
+    pub meta_sealed: Option<&'a str>,
+    pub key_check: Option<&'a str>,
 }
 
 /// Create a room and seat its host in one transaction — a room without a host
@@ -106,8 +115,9 @@ pub async fn create(pool: &PgPool, slug: &str, new_room: NewRoom<'_>) -> sqlx::R
 
     let room = sqlx::query_as::<_, Room>(sqlx::AssertSqlSafe(format!(
         "INSERT INTO rooms (id, slug, name, topic, visibility, category, host_id, owner_id,
-                            password_hash, max_participants, settings)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $7, $8, $9, $10)
+                            password_hash, max_participants, settings, e2ee, meta_sealed,
+                            key_check)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $7, $8, $9, $10, $11, $12, $13)
          RETURNING {ROOM_COLUMNS}"
     )))
     .bind(Uuid::now_v7())
@@ -120,6 +130,9 @@ pub async fn create(pool: &PgPool, slug: &str, new_room: NewRoom<'_>) -> sqlx::R
     .bind(new_room.password_hash)
     .bind(new_room.max_participants)
     .bind(sqlx::types::Json(&new_room.settings))
+    .bind(new_room.e2ee)
+    .bind(new_room.meta_sealed)
+    .bind(new_room.key_check)
     .fetch_one(&mut *tx)
     .await?;
 
@@ -169,6 +182,8 @@ pub struct RoomPatch {
     /// `Some(None)` clears the password; `None` leaves it untouched.
     pub password_hash: Option<Option<String>>,
     pub settings: Option<RoomSettings>,
+    /// New sealed metadata for an encrypted room (replaces a rename).
+    pub meta_sealed: Option<String>,
 }
 
 /// `COALESCE`-based partial update. Every field is optional, and the
@@ -183,7 +198,8 @@ pub async fn update(pool: &PgPool, room_id: Uuid, patch: RoomPatch) -> sqlx::Res
              category         = COALESCE($6, category),
              max_participants = COALESCE($7, max_participants),
              password_hash    = CASE WHEN $8 THEN $9 ELSE password_hash END,
-             settings         = COALESCE($10, settings)
+             settings         = COALESCE($10, settings),
+             meta_sealed      = COALESCE($11, meta_sealed)
          WHERE id = $1 AND deleted_at IS NULL
          RETURNING {ROOM_COLUMNS}"
     )))
@@ -197,6 +213,7 @@ pub async fn update(pool: &PgPool, room_id: Uuid, patch: RoomPatch) -> sqlx::Res
     .bind(patch.password_hash.is_some())
     .bind(patch.password_hash.flatten())
     .bind(patch.settings.map(sqlx::types::Json))
+    .bind(patch.meta_sealed)
     .fetch_one(pool)
     .await
 }

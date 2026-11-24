@@ -7,6 +7,7 @@ mod auth;
 mod cache;
 mod config;
 mod db;
+mod e2ee;
 mod error;
 mod health;
 mod media;
