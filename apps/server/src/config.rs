@@ -211,7 +211,11 @@ impl Config {
 
         let config = Self {
             environment,
-            bind_addr: optional("BIND_ADDR").unwrap_or_else(|| "0.0.0.0:8080".into()),
+            // BIND_ADDR wins; otherwise honour the PORT that platforms such as
+            // Railway inject; otherwise the local default.
+            bind_addr: optional("BIND_ADDR")
+                .or_else(|| optional("PORT").map(|port| format!("0.0.0.0:{port}")))
+                .unwrap_or_else(|| "0.0.0.0:8080".into()),
             public_url,
             web_origin,
             trust_proxy_headers: parse_opt("TRUST_PROXY_HEADERS")?.unwrap_or(false),

@@ -12,7 +12,7 @@
 FROM rust:1.97-bookworm AS planner
 WORKDIR /build
 RUN cargo install cargo-chef --locked --version ^0.1
-COPY Cargo.toml Cargo.lock ./
+COPY Cargo.toml Cargo.lock build.rs ./
 COPY src ./src
 RUN cargo chef prepare --recipe-path recipe.json
 
@@ -26,7 +26,7 @@ RUN cargo install cargo-chef --locked --version ^0.1
 COPY --from=planner /build/recipe.json recipe.json
 RUN cargo chef cook --release --recipe-path recipe.json
 
-COPY Cargo.toml Cargo.lock ./
+COPY Cargo.toml Cargo.lock build.rs ./
 COPY src ./src
 COPY migrations ./migrations
 
