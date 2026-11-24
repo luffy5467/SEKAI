@@ -45,8 +45,9 @@ COPY --from=builder /build/target/release/playercn-server /app/playercn-server
 # Migrations are applied at boot, so they must ship with the binary.
 COPY --from=builder /build/migrations /app/migrations
 
-ENV BIND_ADDR=0.0.0.0:8080 \
-    RUST_BACKTRACE=1
+# No BIND_ADDR here: the server listens on $PORT when a platform (Railway)
+# sets it, else 0.0.0.0:8080. Baking BIND_ADDR in would override PORT.
+ENV RUST_BACKTRACE=1
 EXPOSE 8080
 
 # Distroless has no shell, so the health check must be an exec-form command.

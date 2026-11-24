@@ -75,7 +75,7 @@ async fn main() -> anyhow::Result<()> {
         .context("could not build HTTP client")?;
 
     if config.google.is_none() {
-        tracing::warn!("GOOGLE_CLIENT_ID/SECRET unset — only guest sign-in is available");
+        tracing::warn!("GOOGLE_CLIENT_ID/SECRET unset — Google sign-in is off (email and guest sign-in work)");
     }
     if config.youtube.api_key.is_none() {
         tracing::warn!("YOUTUBE_API_KEY unset — search is disabled; links still work");
