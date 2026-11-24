@@ -1,17 +1,20 @@
-import { useState } from 'react';
+import { Link } from '@tanstack/react-router';
+import { useEffect, useState } from 'react';
 import { Button } from '~/components/ui/button';
 import { Input } from '~/components/ui/input';
 import { Label } from '~/components/ui/label';
 import { Separator } from '~/components/ui/separator';
 import { Spinner } from '~/components/ui/spinner';
 import { useSession } from '~/hooks/use-session';
+import { ApiError } from '~/lib/api';
+import { getClientConfig } from '~/lib/client-config';
 
 /**
  * The sign-in wall.
  *
  * Guest sign-in is first and needs nothing but a name: requiring an account to
- * *join* a room would defeat the point of sharing one link. Google is offered
- * alongside because creating a room does require an identity.
+ * *join* a room would defeat the point of sharing one link. Account sign-in
+ * (email, and Google when the server has it configured) is offered alongside.
  */
 export function JoinGate({
   onJoined,
@@ -26,6 +29,20 @@ export function JoinGate({
   const [displayName, setDisplayName] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [google, setGoogle] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void getClientConfig().then((config) => {
+      if (!cancelled) setGoogle(config.googleSignIn);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const here =
+    typeof window === 'undefined' ? '/' : window.location.pathname + window.location.search;
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -41,8 +58,12 @@ export function JoinGate({
     try {
       await signInAsGuest(trimmed);
       onJoined();
-    } catch {
-      setError('Could not sign you in. Please try again.');
+    } catch (cause) {
+      setError(
+        cause instanceof ApiError && cause.status === 429
+          ? 'Too many sign-ins from this network. Please wait a few minutes and try again.'
+          : 'Could not sign you in. Please try again.',
+      );
     } finally {
       setBusy(false);
     }
@@ -87,16 +108,15 @@ export function JoinGate({
         <Button
           variant="outline"
           className="w-full"
-          onClick={() =>
-            signInWithGoogle(
-              typeof window === 'undefined'
-                ? '/'
-                : window.location.pathname + window.location.search,
-            )
-          }
+          render={<Link to="/sign-in" search={{ mode: 'signin', returnTo: here }} />}
         >
-          Continue with Google
+          Sign in with email
         </Button>
+        {google ? (
+          <Button variant="outline" className="w-full" onClick={() => signInWithGoogle(here)}>
+            Continue with Google
+          </Button>
+        ) : null}
       </div>
     </main>
   );

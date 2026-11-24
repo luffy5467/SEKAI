@@ -71,7 +71,7 @@ async fn guest_login(
         &mut redis,
         "guest_signup",
         &peer.ip().to_string(),
-        20,
+        state.config.limits.guest_signups_per_hour,
         std::time::Duration::from_secs(3600),
     )
     .await;

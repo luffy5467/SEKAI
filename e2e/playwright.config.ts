@@ -27,10 +27,10 @@ export default defineConfig({
   projects: [{ name: 'desktop-chromium', use: { ...devices['Desktop Chrome'] } }],
   webServer: [
     {
-      // Each run registers fresh accounts; the production default (10/hour/IP)
-      // would throttle the suite after a couple of runs.
+      // Each run registers fresh accounts and guests; the production defaults
+      // (10 and 20 per hour per IP) would throttle the suite after a few runs.
       command:
-        "bash -c 'set -a; . ./.env; set +a; RL_REGISTER_PER_HOUR=1000 cargo run --manifest-path apps/server/Cargo.toml'",
+        "bash -c 'set -a; . ./.env; set +a; RL_REGISTER_PER_HOUR=1000 RL_GUEST_PER_HOUR=1000 cargo run --manifest-path apps/server/Cargo.toml'",
       cwd: '..',
       url: 'http://localhost:8080/health/ready',
       reuseExistingServer: true,
